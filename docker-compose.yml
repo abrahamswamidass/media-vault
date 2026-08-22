@@ -1,0 +1,44 @@
+###############################################################################
+# Media Vault — Local Agent
+#
+# Edit the volume paths on the LEFT of each ':' to point at YOUR host folders.
+# Everything on the RIGHT is the fixed path INSIDE the container (don't change).
+#
+# Quick start:
+#   1) cp .env.example .env      # then edit paths
+#   2) docker compose build
+#   3) docker compose run --rm agent nas list --root /data/nas --prefix Photos
+###############################################################################
+services:
+  agent:
+    build: .
+    image: mediavault-agent:latest
+    container_name: mediavault-agent
+    env_file:
+      - .env
+    volumes:
+      # ---- NAS share (SOURCE OF TRUTH) ------------------------------------- #
+      # READ-ONLY by default (the ':ro' suffix) so a bug can never harm it.
+      # The agent only needs write access to the trash subfolder (mounted below).
+      - "${HOST_NAS_PATH:-./sample/nas}:/data/nas:ro"
+
+      # ---- Writable trash (soft-delete lands here) ------------------------- #
+      # Mounted read-WRITE and OVER the read-only share's _trash path.
+      - "${HOST_TRASH_PATH:-./sample/nas/_trash}:/data/nas/_trash:rw"
+
+      # ---- Amazon staging folder (agent copies cherry-picks here) ---------- #
+      - "${HOST_AMAZON_STAGING:-./sample/amazon_staging}:/data/amazon_staging:rw"
+
+      # ---- Exported archives (Google Takeout / Amazon export dumps) -------- #
+      - "${HOST_ARCHIVES:-./sample/archives}:/data/archives:ro"
+
+      # ---- Local catalog DB + thumbnail cache (persist across runs) -------- #
+      - "${HOST_CATALOG:-./data/catalog}:/data/catalog:rw"
+
+      # ---- Secrets (GCP SA key, Drive OAuth, etc.) — read-only ------------- #
+      - "${HOST_SECRETS:-./secrets}:/secrets:ro"
+
+    # Long-lived agent later? Set a loop command. For now it's a task runner:
+    # `run --rm agent <command>`. Uncomment to keep it up:
+    # restart: unless-stopped
+    # command: ["python", "mediavault.py", "--help"]
