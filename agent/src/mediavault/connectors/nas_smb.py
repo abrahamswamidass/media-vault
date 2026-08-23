@@ -129,7 +129,7 @@ class SMBNASConnector(Connector):
         if not commit:
             return self.dryrun_result("delete", rel, detail=f"would move -> {dest_unc}", dest=dest_unc)
         self._smb.makedirs(posixpath.dirname(dest_unc.replace("\\", "/")).replace("/", "\\"), exist_ok=True)
-        self._smb.shutil.move(unc, dest_unc)
+        self._smb.rename(unc, dest_unc)
         return OpResult(ok=True, action="delete", target=rel, committed=True,
                         detail=f"moved to trash: {dest_unc}", data={"dest": dest_unc})
 
