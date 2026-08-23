@@ -32,6 +32,36 @@ To use the pulled image with compose, set `MEDIAVAULT_IMAGE` in `.env`.
 
 ## 2. Point it at your folders
 
+Two ways to do this — pick whichever matches how you're running the image.
+
+### Option A — Docker Desktop GUI (no terminal, no repo checkout needed)
+
+Click the **▶ Run** button on the image in **Images**, expand **Optional
+settings**, and fill in **Volumes** and **Environment variables** directly —
+no `.env` file required:
+
+| Host path | Container path |
+|---|---|
+| your NAS folder, e.g. `Z:\winfredbe\nov2025-cafc` | `/data/nas` |
+| a writable trash folder on the same drive, e.g. `Z:\_trash` | `/data/nas/_trash` |
+| your Amazon staging folder, e.g. `Z:\_AmazonUpload` | `/data/amazon_staging` |
+| a local folder for the index DB, e.g. `C:\mediavault\catalog` | `/data/catalog` |
+| a local folder for credentials, e.g. `C:\mediavault\secrets` | `/secrets` |
+
+Environment variables:
+
+```
+DRIVE_LIVE=0
+GCS_LIVE=0
+```
+
+Set the container's command to `doctor` and click **Run**.
+
+> Start with a small test folder (a subfolder, not the whole NAS root) to
+> confirm everything works before pointing it at the full share.
+
+### Option B — `.env` file + `run.sh` / `run.bat` (repo checked out locally)
+
 ```bash
 cd agent
 cp .env.example .env
@@ -52,6 +82,11 @@ HOST_CATALOG=../data/catalog
 
 ## 3. Check it
 
+Docker Desktop GUI: re-run the container (command `doctor`) and read the logs
+in **Containers**.
+
+CLI:
+
 ```bash
 ./run.sh doctor
 ```
@@ -62,6 +97,12 @@ is optional — indexing and dedup work with just the NAS configured.
 ---
 
 ## Google Drive (optional)
+
+> **Not yet implemented.** `connectors/drive.py` is a guarded stub today — the
+> OAuth wiring below is the intended shape, but `_service()` still raises
+> `NotSupported` even with `DRIVE_LIVE=1`. A synced Drive folder mounted as a
+> local path (e.g. `G:\`) will not work either — the connector talks to the
+> Drive API, not the filesystem. Skip this section until `_service()` is filled in.
 
 Drive is the one cloud you can fully automate, so it gets real OAuth.
 
