@@ -94,11 +94,16 @@ def run_checks() -> list[Check]:
                 "NAS", "share", FAIL, "NAS_HOST and/or NAS_SHARE not set",
                 "NAS_MODE=smb needs NAS_HOST (e.g. 192.168.6.110) and NAS_SHARE "
                 "(e.g. homes) set in agent/.env."))
-        checks.append(_file_check(
-            "NAS", "smb credentials", env("NAS_PASSWORD_FILE"), required=False,
-            fix="Set NAS_USER and NAS_PASSWORD_FILE in agent/.env if the share "
-                "needs auth. NAS_PASSWORD_FILE points at a file under secrets/ "
-                "holding the password (never the password itself in .env)."))
+        if env("NAS_PASSWORD_FILE") or env("NAS_PASSWORD"):
+            checks.append(Check(
+                "NAS", "smb credentials", OK,
+                "via NAS_PASSWORD_FILE" if env("NAS_PASSWORD_FILE") else "via NAS_PASSWORD env var"))
+        else:
+            checks.append(Check(
+                "NAS", "smb credentials", WARN, "not configured",
+                "Set NAS_USER and either NAS_PASSWORD_FILE (a file under secrets/, "
+                "preferred) or NAS_PASSWORD (plain env var) in agent/.env if the "
+                "share needs auth."))
     else:
         checks.append(_dir_check(
             "NAS", "share", env("NAS_ROOT"), need_write=False, required=True,

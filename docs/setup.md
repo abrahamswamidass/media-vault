@@ -112,13 +112,17 @@ NAS_SHARE=homes             # the SMB share name
 NAS_SMB_ROOT=winfredbe/nov2025-cafc   # path inside the share
 NAS_SMB_TRASH=winfredbe/nov2025-cafc/_trash   # optional; defaults to <root>/_trash
 NAS_USER=winfredbe
-NAS_PASSWORD_FILE=/secrets/nas_password.txt   # a file, not the password itself
+NAS_PASSWORD_FILE=/secrets/nas_password.txt   # preferred: a file, not the password itself
+# NAS_PASSWORD=your-password-here             # simpler alternative to the file above
 ```
 
-Put the password in `secrets/nas_password.txt` (plain text, one line) — never
-directly in `.env`. With `NAS_MODE=smb`, `HOST_NAS_PATH`/`HOST_TRASH_PATH` and
-the NAS volume mounts in `docker-compose.yml` are ignored. Re-run `doctor` —
-it now checks `NAS_HOST`/`NAS_SHARE`/credentials instead of the mount path.
+Set `NAS_PASSWORD_FILE` (pointing at a plain-text, one-line file under
+`secrets/`) or `NAS_PASSWORD` directly — not both. The file is preferred since
+it doesn't show up in `docker inspect` or shell history, but the plain env var
+works if you'd rather skip managing a secrets file. With `NAS_MODE=smb`,
+`HOST_NAS_PATH`/`HOST_TRASH_PATH` and the NAS volume mounts in
+`docker-compose.yml` are ignored. Re-run `doctor` — it now checks
+`NAS_HOST`/`NAS_SHARE`/credentials instead of the mount path.
 
 ---
 

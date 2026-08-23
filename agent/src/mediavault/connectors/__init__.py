@@ -35,7 +35,9 @@ def build_connector(name: str, args):
                 root=args.root or os.getenv("NAS_SMB_ROOT", ""),
                 trash=args.trash or os.getenv("NAS_SMB_TRASH"),
                 username=os.getenv("NAS_USER"),
-                password=_read_secret(os.getenv("NAS_PASSWORD_FILE")),
+                # File wins if both are set — it doesn't end up in `docker inspect`
+                # or shell history the way a plain env var does.
+                password=_read_secret(os.getenv("NAS_PASSWORD_FILE")) or os.getenv("NAS_PASSWORD"),
             )
         root = args.root or os.getenv("NAS_ROOT")
         if not root:
