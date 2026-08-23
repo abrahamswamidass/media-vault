@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# Local config — never commit real paths or credentials
+.env
+
+# Credentials. The .gitkeep placeholder stays; nothing else here belongs in git.
+secrets/*
+!secrets/.gitkeep
+
+# Local state: catalog DB, action journal, blob cache. Rebuildable, and large.
+data/catalog/*
+!data/catalog/.gitkeep
+
+# OS / editor
+.DS_Store

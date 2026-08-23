@@ -30,7 +30,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- App code --------------------------------------------------------------- #
-COPY app/ /app/
+# src/ layout: the package lives at /app/src/mediavault, and PYTHONPATH below
+# puts it on the import path without an install step.
+COPY pyproject.toml .
+COPY src/ /app/src/
 
 # Non-root user for safety; can still read the mounted NAS (read-only) and
 # write only to the trash/staging paths you explicitly mount as writable.
@@ -44,13 +47,17 @@ ENV NAS_ROOT=/data/nas \
     ARCHIVE_ROOT=/data/archives \
     AMAZON_STAGING=/data/amazon_staging \
     CATALOG_DB=/data/catalog/catalog.sqlite \
+    ACTION_LOG=/data/catalog/actions \
+    BLOB_CACHE=/data/catalog/blobs \
     DRIVE_LIVE=0 \
+    GCS_LIVE=0 \
+    PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1
 
 # tini = clean signal handling / zombie reaping for a long-lived agent.
 ENTRYPOINT ["tini", "--"]
 
-# Default: print the harness help so `docker run <image>` is self-documenting.
-# Override with any harness command, e.g.:
+# Default: print the CLI help so `docker run <image>` is self-documenting.
+# Override with any command, e.g.:
 #   docker compose run --rm agent nas list --root /data/nas --prefix Photos
-CMD ["python", "mediavault.py", "--help"]
+CMD ["python", "-m", "mediavault.cli", "--help"]

@@ -13,20 +13,33 @@ archives, and an Amazon staging folder**.
 
 ## 📦 What's in this bundle
 
+Two modules that never call each other, plus the contract they meet in.
+
 ```
-mediavault-docker/
-├── Dockerfile              # image w/ exiftool + ffmpeg baked in
-├── docker-compose.yml      # volume mounts (edit paths to your machine)
-├── .env.example            # copy to .env and set your host paths
-├── requirements.txt        # Python deps (core needs none; extras for later)
-├── .dockerignore
+media-vault/
+├── agent/                  # MODULE 1 — local Python. The only thing that touches files.
+│   ├── Dockerfile          #   image w/ exiftool + ffmpeg baked in
+│   ├── docker-compose.yml  #   volume mounts (edit paths to your machine)
+│   ├── .env.example        #   copy to .env and set your host paths
+│   ├── pyproject.toml
+│   ├── src/mediavault/
+│   │   ├── ports.py        #   Connector + BlobStore interfaces
+│   │   ├── connectors/     #   one adapter per source: nas, drive, archive, amazon
+│   │   ├── blobstore.py    #   local (tests) and GCS (real) blob adapters
+│   │   ├── imaging.py      #   thumbnail + preview derivation
+│   │   ├── actions/        #   every mutation, as a Command object
+│   │   ├── sync/           #   intents in, facts out
+│   │   └── cli.py
+│   └── tests/              #   runs with no cloud account and no Docker
+├── web/                    # MODULE 2 — React on Firebase Hosting (not yet built)
+├── shared/contracts/       # JSON Schema both modules validate against
+├── docs/                   # architecture.html · setup.md · command-catalog.html
 ├── run.sh / run.bat        # convenience wrappers (Linux-macOS / Windows)
-├── app/
-│   ├── mediavault.py       # single-file harness (what the container runs)
-│   ├── catalog.html        # open in a browser: interactive command catalog
-│   └── harness/            # same code as a proper package (importable)
 └── sample/                 # a fake NAS so you can try it with zero setup
 ```
+
+Start with [docs/setup.md](docs/setup.md). See [docs/architecture.html](docs/architecture.html)
+for how the two modules stay in sync, and [CLAUDE.md](CLAUDE.md) for the design rules.
 
 ---
 
@@ -63,6 +76,7 @@ docker compose version
 ## 1) Configure your paths
 
 ```bash
+cd agent
 cp .env.example .env
 ```
 
@@ -90,6 +104,7 @@ included `sample/` fake NAS.
 ## 2) Build the image
 
 ```bash
+cd agent
 docker compose build
 ```
 
@@ -99,7 +114,7 @@ This installs `exiftool` + `ffmpeg` and your Python deps once, then caches them.
 
 ## 3) Run commands
 
-The agent is a **task runner**: `docker compose run --rm agent python mediavault.py <args>`.
+The agent is a **task runner**: `./run.sh <args>`.
 Use the wrappers to keep it short.
 
 ### Linux / macOS
@@ -127,16 +142,19 @@ run.bat nas delete --root /data/nas "Photos/junk.jpg" --commit
 > commands — **not** your Windows/host paths. The host↔container mapping is done
 > by the volume mounts in `docker-compose.yml`.
 
-### Without the wrappers
+### Without Docker
+The agent core is standard-library only, so it also runs directly:
 ```bash
-docker compose run --rm agent python mediavault.py nas list --root /data/nas
+cd agent
+PYTHONPATH=src python -m mediavault.cli nas list --root ../sample/nas
+python -m pytest tests/ -q
 ```
 
 ---
 
 ## 4) The interactive catalog
 
-Open **`app/catalog.html`** in any browser (double-click it) for a visual command
+Open **`docs/command-catalog.html`** in any browser (double-click it) for a visual command
 reference with **one-click copy** buttons and the full system architecture diagram.
 When running via Docker, just remember to swap host paths for `/data/...` container
 paths shown above.
@@ -174,7 +192,7 @@ the Synology (Container Manager) or a NUC:
 
 1. Copy this folder over.
 2. Adjust the `HOST_*` paths in `.env` for that machine.
-3. `docker compose build && docker compose run --rm agent ...`
+3. `cd agent && docker compose build`, then `./run.sh ...` from the repo root.
 
 No code changes — the app uses POSIX paths internally and reads everything from env.
 

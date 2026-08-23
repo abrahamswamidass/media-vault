@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from typing import Iterable
 
-from ..base import Connector, FileRecord, OpResult, NotSupported
+from ..ports import Connector, FileRecord, OpResult, NotSupported
 
 LIVE = os.getenv("DRIVE_LIVE", "0") == "1"
 

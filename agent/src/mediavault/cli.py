@@ -26,7 +26,7 @@ import json
 import sys
 
 from .connectors import build_connector, CONNECTORS
-from .base import NotSupported, OpResult, FileRecord
+from .ports import NotSupported, OpResult, FileRecord
 
 
 def _emit(obj, as_json: bool):

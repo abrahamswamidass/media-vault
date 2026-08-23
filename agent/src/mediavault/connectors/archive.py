@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from ..base import Connector, FileRecord, NotSupported
+from ..ports import Connector, FileRecord, NotSupported
 from .nas import NASConnector
 
 

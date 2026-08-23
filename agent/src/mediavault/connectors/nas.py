@@ -15,7 +15,7 @@ import mimetypes
 from pathlib import Path
 from typing import Iterable
 
-from ..base import Connector, FileRecord, OpResult, NotSupported
+from ..ports import Connector, FileRecord, OpResult, NotSupported
 
 
 def quick_fingerprint(path: Path, chunk: int = 65536) -> str:

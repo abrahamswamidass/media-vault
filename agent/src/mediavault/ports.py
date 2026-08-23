@@ -53,6 +53,30 @@ class NotSupported(Exception):
 
 
 # --------------------------------------------------------------------------- #
+# The blob port — where derived images go
+# --------------------------------------------------------------------------- #
+class BlobStore(ABC):
+    """Somewhere to put derived bytes and get them back by key.
+
+    Peer of `Connector`: connectors read your originals, blob stores hold the
+    thumbnails and previews made from them. Adapters live in `blobstore.py`.
+    """
+    name: str = "blobstore"
+
+    @abstractmethod
+    def exists(self, key: str) -> bool:
+        """True if this key is already stored. Cheap — a HEAD, not a download."""
+
+    @abstractmethod
+    def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        """Store bytes under key. Returns the key. Overwrites if present."""
+
+    @abstractmethod
+    def url(self, key: str) -> str:
+        """A reference the web module can resolve. Not necessarily public."""
+
+
+# --------------------------------------------------------------------------- #
 # The interface every connector implements
 # --------------------------------------------------------------------------- #
 class Connector(ABC):
