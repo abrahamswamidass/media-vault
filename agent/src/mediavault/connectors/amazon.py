@@ -20,9 +20,17 @@ class AmazonConnector(Connector):
     can_delete = False
     can_upload = True
 
-    def __init__(self, staging_root: str, album_by_month: bool = True):
+    def __init__(self, staging_root: str | None = None, album_by_month: bool = True,
+                 fs: Connector | None = None):
+        """Either pass staging_root (mount-based, the original path) or a
+        pre-built connector via fs= (e.g. an SMBNASConnector, for NAS_MODE=smb)."""
         self.album_by_month = album_by_month
-        self._fs = NASConnector(staging_root, trash=str(Path(staging_root) / "__never_used_trash"))
+        if fs is not None:
+            self._fs = fs
+        elif staging_root:
+            self._fs = NASConnector(staging_root, trash=str(Path(staging_root) / "__never_used_trash"))
+        else:
+            raise ValueError("AmazonConnector needs staging_root or fs")
 
     def list(self, prefix: str = "", limit: int = 100):
         # Lets you inspect what's currently staged/waiting for the app to pick up.

@@ -47,8 +47,14 @@ class SMBNASConnector(Connector):
         self._smb = smbclient
         self.host = host
         self.share = share
-        self._root_rel = root.strip("/\\").replace("\\", "/")
-        self._trash_rel = (trash or posixpath.join(self._root_rel, "_trash")).strip("/\\").replace("\\", "/")
+        self._root_rel = self._strip_share_prefix(root)
+        # Trash defaults to nested under root, but an explicit NAS_SMB_TRASH is
+        # a path relative to the SHARE, not the root — so it can sit at a fixed
+        # spot (e.g. "_trash" at the share's top level) no matter what NAS_SMB_ROOT
+        # points at. Full UNC strings (\\host\share\...) are accepted too; the
+        # host/share prefix is stripped since this connector is already scoped
+        # to one host+share.
+        self._trash_rel = self._strip_share_prefix(trash) if trash else posixpath.join(self._root_rel, "_trash")
         self.root = self._to_unc(self._root_rel)
         self.trash = self._to_unc(self._trash_rel)
 
@@ -64,6 +70,15 @@ class SMBNASConnector(Connector):
             ) from exc
 
     # --- path helpers ------------------------------------------------------ #
+    def _strip_share_prefix(self, value: str) -> str:
+        """Accept either a bare share-relative path or a full \\\\host\\share\\... UNC string."""
+        v = value.strip()
+        for prefix in (f"\\\\{self.host}\\{self.share}", f"//{self.host}/{self.share}"):
+            if v.lower().startswith(prefix.lower()):
+                v = v[len(prefix):]
+                break
+        return v.strip("/\\").replace("\\", "/")
+
     def _to_unc(self, rel: str) -> str:
         rel = rel.strip("/").replace("/", "\\")
         base = f"\\\\{self.host}\\{self.share}"

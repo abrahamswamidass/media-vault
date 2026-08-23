@@ -17,6 +17,19 @@ def _read_secret(path: str | None) -> str | None:
         return f.read().strip()
 
 
+def _smb_host_share() -> tuple[str, str]:
+    host, share = os.getenv("NAS_HOST"), os.getenv("NAS_SHARE")
+    if not host or not share:
+        raise SystemExit("NAS_MODE=smb needs NAS_HOST and NAS_SHARE set")
+    return host, share
+
+
+def _smb_password() -> str | None:
+    # File wins if both are set — it doesn't end up in `docker inspect` or
+    # shell history the way a plain env var does.
+    return _read_secret(os.getenv("NAS_PASSWORD_FILE")) or os.getenv("NAS_PASSWORD")
+
+
 def build_connector(name: str, args):
     """Factory used by the CLI. Pulls paths from --root/flags or environment."""
     if name == "nas":
@@ -26,18 +39,16 @@ def build_connector(name: str, args):
             # mapped network drive).
             from .nas_smb import SMBNASConnector
 
-            host = os.getenv("NAS_HOST")
-            share = os.getenv("NAS_SHARE")
-            if not host or not share:
-                raise SystemExit("NAS_MODE=smb needs NAS_HOST and NAS_SHARE set")
+            host, share = _smb_host_share()
             return SMBNASConnector(
                 host, share,
                 root=args.root or os.getenv("NAS_SMB_ROOT", ""),
+                # NAS_SMB_TRASH is a fixed spot relative to the SHARE (not the
+                # root above), so archiving lands in the same place no matter
+                # which subfolder you point NAS_SMB_ROOT at.
                 trash=args.trash or os.getenv("NAS_SMB_TRASH"),
                 username=os.getenv("NAS_USER"),
-                # File wins if both are set — it doesn't end up in `docker inspect`
-                # or shell history the way a plain env var does.
-                password=_read_secret(os.getenv("NAS_PASSWORD_FILE")) or os.getenv("NAS_PASSWORD"),
+                password=_smb_password(),
             )
         root = args.root or os.getenv("NAS_ROOT")
         if not root:
@@ -57,6 +68,21 @@ def build_connector(name: str, args):
         return ArchiveConnector(root)
 
     if name == "amazon":
+        if os.getenv("NAS_MODE", "mount") == "smb":
+            from .nas_smb import SMBNASConnector
+
+            host, share = _smb_host_share()
+            root = args.root or os.getenv("AMAZON_SMB_ROOT", "_AmazonUpload")
+            fs = SMBNASConnector(
+                host, share, root=root,
+                # This staging folder never soft-deletes, so trash is unused —
+                # a stray non-existent subpath is fine (it's only ever asked
+                # for on delete(), which Amazon's connector doesn't call).
+                trash=f"{root}/__never_used_trash",
+                username=os.getenv("NAS_USER"),
+                password=_smb_password(),
+            )
+            return AmazonConnector(fs=fs)
         root = args.root or os.getenv("AMAZON_STAGING")
         if not root:
             raise SystemExit("amazon needs --root <staging-folder> (the Amazon-watched folder)")

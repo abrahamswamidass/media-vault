@@ -23,6 +23,8 @@ docker run -d --name media-vault-container --user root `
   -e NAS_HOST=192.168.6.110 `
   -e NAS_SHARE=homes `
   -e NAS_SMB_ROOT=winfredbe/nov2025-cafc `
+  -e NAS_SMB_TRASH=_trash `
+  -e AMAZON_SMB_ROOT=_AmazonUpload `
   -e NAS_USER=winfredbe `
   -e 'NAS_PASSWORD=your-password-here' `
   -v "C:\mediavault\catalog:/data/catalog" `
@@ -35,8 +37,16 @@ Notes:
 - **`NAS_HOST`** — your NAS's IP or hostname.
 - **`NAS_SHARE`** — the SMB share name (e.g. `homes`).
 - **`NAS_SMB_ROOT`** — the path *inside* that share to index, forward slashes,
-  no leading slash (e.g. `winfredbe/nov2025-cafc`).
-- **`NAS_SMB_TRASH`** — optional; defaults to `<NAS_SMB_ROOT>/_trash`.
+  no leading slash (e.g. `winfredbe/nov2025-cafc`). Point this at any subfolder
+  you want to scan — trash and Amazon staging below don't move when this does.
+- **`NAS_SMB_TRASH`** and **`AMAZON_SMB_ROOT`** — both relative to the **share**
+  (`homes`), not to `NAS_SMB_ROOT`. That's deliberate: wherever you point
+  `NAS_SMB_ROOT` (a different album, a different year), archived duplicates and
+  staged Amazon uploads always land in the same fixed place —
+  `\\192.168.6.110\homes\_trash` and `\\192.168.6.110\homes\_AmazonUpload` here.
+  Omit `NAS_SMB_TRASH` to default to `<NAS_SMB_ROOT>/_trash` instead (nested,
+  moves with the root); omit `AMAZON_SMB_ROOT` to default to `_AmazonUpload` at
+  the share's top level.
 - **`NAS_PASSWORD`** — wrap in **single quotes** in PowerShell. Without quotes,
   a `$` in the password gets silently interpreted as a variable and the
   connection fails with `STATUS_LOGON_FAILURE`.
@@ -45,12 +55,8 @@ Notes:
 - `sleep infinity` keeps the container running so you can `exec` into it
   repeatedly instead of creating a new container per command.
 
-To use the Amazon staging step too, add a volume and env var for it:
-
-```powershell
-  -v "Z:\_AmazonUpload:/data/amazon_staging" `
-  -e AMAZON_STAGING=/data/amazon_staging `
-```
+No volume mount or extra env var is needed for Amazon staging beyond
+`AMAZON_SMB_ROOT` above — it goes over the same SMB connection as the NAS.
 
 ## 3. Check it
 
@@ -91,11 +97,16 @@ identical. Archived copies move to trash — the NAS trash folder, or Drive's
 ### Amazon
 
 ```powershell
-docker exec media-vault-container python -m mediavault.cli amazon upload /data/nas/Photos/2026-01/img_001.jpg --commit
+docker exec media-vault-container python -m mediavault.cli amazon upload /path/to/local/img_001.jpg --commit
 ```
 
-Stages the file into the watched folder. Amazon's desktop app picks it up and
-it appears on your Fire TV. No Amazon API or credentials involved.
+Stages the file into the watched folder (`AMAZON_SMB_ROOT`, dated by month).
+Amazon's desktop app picks it up and it appears on your Fire TV. No Amazon API
+or credentials involved. The source path here must be reachable *inside the
+container's own filesystem* — not a NAS path, since `upload` copies a local
+file onto the share. If the file you want to stage only exists on the NAS,
+mount it in (`-v` a local copy, or a small folder) rather than passing an SMB
+path directly.
 
 ---
 

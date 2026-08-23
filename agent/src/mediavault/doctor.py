@@ -138,12 +138,17 @@ def run_checks() -> list[Check]:
             "Set DRIVE_LIVE=1 in agent/.env once the OAuth client JSON is in place."))
 
     # --- 3. Amazon: no API, no keys. Just a watched folder. -------------- #
-    checks.append(_dir_check(
-        "Amazon", "staging folder", env("AMAZON_STAGING"), need_write=True,
-        required=False,
-        fix="Set HOST_AMAZON_STAGING in agent/.env to the folder the Amazon Photos "
-            "desktop app watches. There are no Amazon credentials — the agent copies "
-            "files in and Amazon's own app uploads them."))
+    if env("NAS_MODE", "mount") == "smb":
+        checks.append(Check(
+            "Amazon", "staging folder", OK,
+            f"smb share-relative: {env('AMAZON_SMB_ROOT', '_AmazonUpload')}"))
+    else:
+        checks.append(_dir_check(
+            "Amazon", "staging folder", env("AMAZON_STAGING"), need_write=True,
+            required=False,
+            fix="Set HOST_AMAZON_STAGING in agent/.env to the folder the Amazon Photos "
+                "desktop app watches. There are no Amazon credentials — the agent copies "
+                "files in and Amazon's own app uploads them."))
 
     # --- 4. Google Cloud mirror: service account. ------------------------ #
     gcs_live = env("GCS_LIVE", "0") == "1"
