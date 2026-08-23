@@ -1,0 +1,143 @@
+# Setup
+
+Four things to configure. Only **two of them involve credentials** — NAS is just
+paths, and Amazon has no API at all.
+
+| | Needs | Effort |
+|---|---|---|
+| NAS | a path | edit `.env` |
+| Amazon | a path | edit `.env` |
+| Google Drive | OAuth client JSON | one-time, ~3 min |
+| Cloud mirror | service-account JSON | one-time, ~3 min |
+
+At any point, `doctor` tells you what's done and what isn't.
+
+---
+
+## 1. Get the image
+
+Either pull what CI built:
+
+```bash
+docker pull ghcr.io/OWNER/media-vault/agent:latest      # lowercase OWNER
+```
+
+Or build it yourself:
+
+```bash
+cd agent && docker compose build
+```
+
+To use the pulled image with compose, set `MEDIAVAULT_IMAGE` in `.env`.
+
+## 2. Point it at your folders
+
+```bash
+cd agent
+cp .env.example .env
+```
+
+Edit the four `HOST_*` paths. Only the left side of each volume mapping changes;
+the container paths under `/data` stay fixed.
+
+```ini
+HOST_NAS_PATH=/mnt/nas/Photos          # or Z:/Photos, //DISKSTATION/Photos
+HOST_TRASH_PATH=/mnt/nas/Photos/_trash # must be writable, same volume
+HOST_AMAZON_STAGING=/mnt/nas/_AmazonUpload
+HOST_CATALOG=../data/catalog
+```
+
+> On Windows use forward slashes, and add the drive under Docker Desktop →
+> Settings → Resources → File Sharing.
+
+## 3. Check it
+
+```bash
+./run.sh doctor
+```
+
+Green means ready. Anything red prints the exact fix beneath it. Everything below
+is optional — indexing and dedup work with just the NAS configured.
+
+---
+
+## Google Drive (optional)
+
+Drive is the one cloud you can fully automate, so it gets real OAuth.
+
+1. [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services →
+   Library** → enable **Google Drive API**.
+2. **Credentials → Create credentials → OAuth client ID → Desktop app**.
+3. Download the JSON to `secrets/drive_credentials.json`.
+4. In `.env`: `DRIVE_LIVE=1`.
+
+Keep the consent screen in **Testing** mode and add yourself as a test user —
+personal single-user apps need no Google verification.
+
+```bash
+./run.sh doctor          # confirms the client JSON is found
+```
+
+## Cloud mirror (optional)
+
+Needed only when you want thumbnails in the browser.
+
+1. **Cloud Storage → Create bucket.** Single region, Standard class.
+2. **Add a lifecycle rule: delete objects under `previews/` after 1 day.**
+   This one is load-bearing — without it, full-res fetches accumulate forever.
+3. **IAM → Service Accounts → Create.** Grant *Storage Object Admin* and
+   *Cloud Datastore User*.
+4. Download the key JSON to `secrets/`, then in `.env`:
+
+```ini
+GCS_LIVE=1
+GCS_BUCKET=your-bucket-name
+GOOGLE_APPLICATION_CREDENTIALS=/secrets/your-key.json
+```
+
+## Amazon
+
+Nothing to configure beyond the folder path. There is no Amazon API here by
+design — the agent copies files into the folder the Amazon Photos desktop app
+watches, and Amazon's own app does the upload. No keys, nothing to break.
+
+---
+
+## Daily use
+
+```bash
+./run.sh doctor                  # is everything reachable?
+./run.sh index nas               # walk the NAS into the catalog (resumable)
+./run.sh stats                   # what's indexed, what's duplicated
+./run.sh dedup nas               # preview: which copies would be archived
+./run.sh dedup nas --commit      # archive them (to trash — recoverable)
+```
+
+Indexing a terabyte takes a while and checkpoints after every directory. If it
+dies, run the same command again and it resumes where it stopped.
+
+### Deduplication
+
+Duplicates are found **within one source only**. The same photo on the NAS and in
+Drive is this system working as designed — Drive is your curated cloud copy — so
+that pair is never touched.
+
+```bash
+./run.sh dedup nas               # NAS internal duplicates
+./run.sh dedup drive             # Drive internal duplicates (needs DRIVE_LIVE=1)
+```
+
+Every group keeps exactly one copy: the **oldest**, tie-broken by the shallowest
+path. Files over 128 KB are fully hashed before anything is archived, because
+sharing a size and both end-chunks is not proof of being identical. Archived
+copies move to trash — the NAS trash folder, or Drive's 30-day trash — and stay
+recoverable.
+
+### Amazon
+
+```bash
+./run.sh amazon upload /data/nas/Photos/2026-01/img_001.jpg --commit
+```
+
+Stages the file into a dated album folder. Amazon's desktop app picks it up and
+it appears on your Fire TV.

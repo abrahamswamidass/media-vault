@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-vault.local/contracts/action.schema.json",
+  "title": "ActionResult",
+  "description": "One completed action. Written by the agent to its local JSONL journal and mirrored to Firestore. Append-only: a result is never edited after it is written.",
+  "type": "object",
+  "required": [
+    "action_type",
+    "status",
+    "committed",
+    "target_id",
+    "detail",
+    "at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "delete",
+        "copy",
+        "move",
+        "thumbnail",
+        "fetch_fullres",
+        "archive_duplicates",
+        "index",
+        "dedup_source"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "description": "'no-op' means the action was valid but the desired state already held \u2014 a success that changed nothing. Worth telling apart from 'ok' when reading a replayed intent.",
+      "enum": [
+        "ok",
+        "failed",
+        "no-op"
+      ]
+    },
+    "committed": {
+      "type": "boolean",
+      "description": "False for a dry-run or a no-op. True only when bytes actually moved."
+    },
+    "target_id": {
+      "type": "string",
+      "description": "The item acted on."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Human-readable summary. Safe to show in the UI verbatim."
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Every parameter the action was constructed with \u2014 enough to rebuild and replay it.",
+      "additionalProperties": true
+    },
+    "outputs": {
+      "type": "object",
+      "description": "What changed. For derived blobs this carries the content-addressed key the web module then fetches.",
+      "additionalProperties": true,
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Blob key, e.g. 'previews/preview/15423a9f3c1.jpg'."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dest": {
+          "type": "string",
+          "description": "Destination path, for file operations."
+        }
+      }
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Set if and only if status is 'failed'."
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC, set when the result object was built."
+    }
+  }
+}

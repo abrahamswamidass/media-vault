@@ -1,0 +1,224 @@
+"""
+The local catalog — a SQLite index of everything the agent has seen.
+
+Two jobs:
+
+  * **Answer questions without touching the mount.** "How many photos?", "what
+    duplicates exist?", "what changed since Tuesday?" all resolve from here.
+  * **Survive a crash.** A 1 TB scan takes hours. The `scans` table holds a
+    cursor so an interrupted pass resumes from the last committed directory
+    rather than starting over.
+
+The catalog is a cache, never a source of truth. If it disagrees with the NAS,
+the NAS is right and the next scan corrects it. Deleting the file is always safe.
+"""
+from __future__ import annotations
+
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable, Iterator, Optional
+
+from ..ports import FileRecord
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS items (
+    source      TEXT NOT NULL,
+    item_id     TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    size        INTEGER,
+    mtime       REAL,
+    mime        TEXT,
+    quick_hash  TEXT,
+    full_hash   TEXT,
+    state       TEXT NOT NULL DEFAULT 'active',
+    indexed_at  TEXT NOT NULL,
+    PRIMARY KEY (source, item_id)
+);
+
+-- Dedup always groups within one source, never across. The index reflects that.
+CREATE INDEX IF NOT EXISTS idx_items_dedup
+    ON items (source, quick_hash) WHERE state = 'active' AND quick_hash IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_items_state ON items (source, state);
+
+CREATE TABLE IF NOT EXISTS scans (
+    source      TEXT PRIMARY KEY,
+    cursor      TEXT,
+    started_at  TEXT,
+    updated_at  TEXT,
+    items_seen  INTEGER NOT NULL DEFAULT 0,
+    complete    INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Catalog:
+    """SQLite-backed index. One file, no server, safe to delete."""
+
+    def __init__(self, db_path: str = "/data/catalog/catalog.sqlite"):
+        self.path = Path(db_path).expanduser()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(self.path))
+        self.conn.row_factory = sqlite3.Row
+        # WAL keeps reads working while a long scan writes.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.executescript(SCHEMA)
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        try:
+            yield self.conn
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    # --- writing ---------------------------------------------------------- #
+    def upsert(self, source: str, record: FileRecord) -> None:
+        """Record one item. Re-indexing an unchanged file is a cheap no-op write."""
+        self.conn.execute(
+            """
+            INSERT INTO items (source, item_id, name, size, mtime, mime,
+                               quick_hash, state, indexed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+            ON CONFLICT(source, item_id) DO UPDATE SET
+                name       = excluded.name,
+                size       = excluded.size,
+                mtime      = excluded.mtime,
+                mime       = excluded.mime,
+                quick_hash = excluded.quick_hash,
+                indexed_at = excluded.indexed_at,
+                -- content changed? the old full hash is stale.
+                full_hash  = CASE WHEN items.quick_hash IS NOT excluded.quick_hash
+                                  THEN NULL ELSE items.full_hash END
+            """,
+            (source, record.id, record.name, record.size, record.mtime,
+             record.mime, record.quick_hash, _now()),
+        )
+
+    def set_full_hash(self, source: str, item_id: str, full_hash: str) -> None:
+        self.conn.execute(
+            "UPDATE items SET full_hash = ? WHERE source = ? AND item_id = ?",
+            (full_hash, source, item_id),
+        )
+
+    def mark_archived(self, source: str, item_id: str) -> None:
+        """Flag an item as archived. The row stays so the change is visible."""
+        self.conn.execute(
+            "UPDATE items SET state = 'archived' WHERE source = ? AND item_id = ?",
+            (source, item_id),
+        )
+
+    # --- reading ---------------------------------------------------------- #
+    def get(self, source: str, item_id: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM items WHERE source = ? AND item_id = ?", (source, item_id)
+        ).fetchone()
+
+    def count(self, source: str | None = None, state: str = "active") -> int:
+        if source:
+            return self.conn.execute(
+                "SELECT COUNT(*) FROM items WHERE source = ? AND state = ?",
+                (source, state)).fetchone()[0]
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM items WHERE state = ?", (state,)).fetchone()[0]
+
+    def sources(self) -> list[str]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT source FROM items ORDER BY source")]
+
+    def duplicate_groups(self, source: str, min_size: int = 1) -> list[list[sqlite3.Row]]:
+        """Active items in one source sharing a quick_hash, grouped.
+
+        Scoped to a single source on purpose. NAS and Drive holding the same photo
+        is this system working as designed — Drive is the curated cloud copy — so a
+        cross-source comparison would propose exactly the deletions we must never make.
+
+        `min_size` skips trivially small files, where a shared head/tail fingerprint
+        is more likely to be a coincidence than a real duplicate.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT * FROM items
+            WHERE source = ? AND state = 'active'
+              AND quick_hash IS NOT NULL
+              AND size >= ?
+              AND quick_hash IN (
+                  SELECT quick_hash FROM items
+                  WHERE source = ? AND state = 'active' AND quick_hash IS NOT NULL
+                    AND size >= ?
+                  GROUP BY quick_hash HAVING COUNT(*) > 1
+              )
+            ORDER BY quick_hash, mtime, item_id
+            """,
+            (source, min_size, source, min_size),
+        ).fetchall()
+
+        groups: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            groups.setdefault(row["quick_hash"], []).append(row)
+        return list(groups.values())
+
+    def wasted_bytes(self, source: str) -> int:
+        """How much space the redundant copies occupy — total minus one per group."""
+        return sum(
+            g[0]["size"] * (len(g) - 1)
+            for g in self.duplicate_groups(source)
+            if g and g[0]["size"]
+        )
+
+    # --- scan checkpointing ----------------------------------------------- #
+    def begin_scan(self, source: str, resume: bool = True) -> str:
+        """Start or resume a scan. Returns the cursor to resume from ('' if fresh)."""
+        row = self.conn.execute(
+            "SELECT cursor, complete FROM scans WHERE source = ?", (source,)).fetchone()
+        if resume and row and not row["complete"]:
+            return row["cursor"] or ""
+        with self.transaction() as c:
+            c.execute(
+                """
+                INSERT INTO scans (source, cursor, started_at, updated_at, items_seen, complete)
+                VALUES (?, '', ?, ?, 0, 0)
+                ON CONFLICT(source) DO UPDATE SET
+                    cursor = '', started_at = excluded.started_at,
+                    updated_at = excluded.updated_at, items_seen = 0, complete = 0
+                """,
+                (source, _now(), _now()),
+            )
+        return ""
+
+    def checkpoint(self, source: str, cursor: str, items_seen: int) -> None:
+        """Commit progress. Called per directory, so a crash costs one directory."""
+        with self.transaction() as c:
+            c.execute(
+                "UPDATE scans SET cursor = ?, updated_at = ?, items_seen = ? WHERE source = ?",
+                (cursor, _now(), items_seen, source),
+            )
+
+    def finish_scan(self, source: str) -> None:
+        with self.transaction() as c:
+            c.execute(
+                "UPDATE scans SET complete = 1, cursor = '', updated_at = ? WHERE source = ?",
+                (_now(), source),
+            )
+
+    def scan_state(self, source: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM scans WHERE source = ?", (source,)).fetchone()

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-vault.local/contracts/intent.schema.json",
+  "title": "Intent",
+  "description": "A request from the web module for the agent to perform one action. The web module owns type/item_id/params; the agent owns status/claimed_at/result. Neither writes the other's fields.",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "item_id",
+    "status",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Client-generated unique id. Doubles as the idempotency key: the agent records processed ids and refuses a replay."
+    },
+    "type": {
+      "type": "string",
+      "description": "Which action to perform. Must be a key in the agent's REGISTRY; anything else is refused.",
+      "enum": [
+        "fetch_fullres",
+        "thumbnail",
+        "delete",
+        "copy",
+        "move",
+        "index",
+        "dedup_source"
+      ]
+    },
+    "item_id": {
+      "type": "string",
+      "description": "For per-file intents, the connector-native id (for the NAS, a path relative to the share root). For the library-wide intents 'index' and 'dedup_source', the source name itself."
+    },
+    "params": {
+      "type": "object",
+      "description": "Type-specific extras.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "nas",
+            "drive",
+            "archive",
+            "amazon"
+          ],
+          "default": "nas",
+          "description": "Which connector item_id belongs to."
+        },
+        "dest": {
+          "type": "string",
+          "enum": [
+            "nas",
+            "drive",
+            "archive",
+            "amazon"
+          ],
+          "description": "Destination connector, for copy and move."
+        },
+        "dest_path": {
+          "type": "string",
+          "description": "Destination sub-path, for copy and move. Defaults to the source filename."
+        },
+        "variant": {
+          "type": "string",
+          "enum": [
+            "preview",
+            "original"
+          ],
+          "default": "preview",
+          "description": "fetch_fullres only. 'preview' is a 2048px JPEG (~500 KB) and is what you want for judging a photo; 'original' is the untouched bytes, for downloading the real file."
+        },
+        "force": {
+          "type": "boolean",
+          "default": false,
+          "description": "thumbnail only. Re-derive even if the blob already exists."
+        },
+        "restart": {
+          "type": "boolean",
+          "default": false,
+          "description": "index only. Ignore any checkpoint and scan from the beginning."
+        },
+        "confirm": {
+          "type": "boolean",
+          "default": true,
+          "description": "dedup_source only. Verify candidates by full content hash before archiving. Leaving this on is what makes automatic archiving safe; groups that cannot be confirmed are skipped rather than archived."
+        },
+        "min_size": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1,
+          "description": "dedup_source only. Ignore files smaller than this many bytes."
+        },
+        "max_groups": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "dedup_source only. Cap how many duplicate groups one run archives."
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "description": "Agent-owned. Moves forward only: pending -> claimed -> done|failed.",
+      "enum": [
+        "pending",
+        "claimed",
+        "done",
+        "failed"
+      ],
+      "default": "pending"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC. Set by the web module at write time."
+    },
+    "claimed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Agent-owned. When the claim transaction succeeded. An intent claimed longer ago than the lease (600s) is treated as abandoned and may be reclaimed."
+    },
+    "result": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Agent-owned. The ActionResult, once the action ran. See action.schema.json.",
+      "$ref": "action.schema.json"
+    }
+  }
+}

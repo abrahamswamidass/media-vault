@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-vault.local/contracts/item.schema.json",
+  "title": "Item",
+  "description": "One catalogued file. Written only by the agent; the web module reads and never writes. The NAS is the source of truth and this document is a mirror of it — if the two disagree, the NAS is right and the next scan corrects the mirror.",
+  "type": "object",
+  "required": ["id", "source", "path", "name", "content_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Firestore document id. The content hash, so identical files across sources collapse to one document."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["nas", "drive", "archive", "amazon"],
+      "description": "Which connector this item was catalogued from."
+    },
+    "path": {
+      "type": "string",
+      "description": "Connector-native id — for the NAS, the path relative to the share root. This is what an intent's item_id carries."
+    },
+    "name": { "type": "string" },
+    "size": { "type": ["integer", "null"], "minimum": 0 },
+    "mtime": {
+      "type": ["number", "null"],
+      "description": "Epoch seconds, from the filesystem."
+    },
+    "mime": { "type": ["string", "null"] },
+    "content_hash": {
+      "type": "string",
+      "description": "The join key for every derived blob. Cheap fingerprint: file size plus a SHA-1 of the first and last 64 KB, so it never reads a whole file over the mount. Thumbnails live at 'thumbs/<hash>.webp'."
+    },
+    "thumb": {
+      "type": ["string", "null"],
+      "description": "Blob key of the 400px WebP thumbnail, once pushed. Derivable from content_hash; stored explicitly so the UI can tell 'not yet generated' from 'generated'."
+    },
+    "taken_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Capture time from EXIF where available, falling back to mtime. What the UI sorts by."
+    },
+    "width": { "type": ["integer", "null"], "minimum": 0 },
+    "height": { "type": ["integer", "null"], "minimum": 0 },
+    "indexed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the agent last wrote this document."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["active", "trashed"],
+      "default": "active",
+      "description": "'trashed' means a delete action moved it to the NAS trash folder. The document stays so the deletion is visible and reversible."
+    }
+  }
+}

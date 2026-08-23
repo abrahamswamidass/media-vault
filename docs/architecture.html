@@ -1,0 +1,720 @@
+<title>Media Vault Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+/* ---------------------------------------------------------------------------
+   Dark-first, matching the palette already used by the scorecard and the
+   command catalog so all three read as one set. Light is a considered
+   counterpart, not an inversion.
+   --------------------------------------------------------------------------- */
+:root {
+  --bg:      #0b0f17;
+  --panel:   #121826;
+  --panel-2: #0e1420;
+  --line:    #22304a;
+  --line-2:  #1a2436;
+  --ink:     #e8eef7;
+  --mut:     #8ea2c0;
+  --dim:     #64789a;
+
+  /* The two directions. Blue leaves home, green comes back. */
+  --fact:    #4da3ff;
+  --wish:    #37d67a;
+  --warn:    #f5a623;
+
+  --fact-wash: rgba(77, 163, 255, 0.10);
+  --wish-wash: rgba(55, 214, 122, 0.10);
+  --warn-wash: rgba(245, 166, 35, 0.10);
+
+  --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --measure: 68ch;
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:      #f6f8fc;
+    --panel:   #ffffff;
+    --panel-2: #eef2f9;
+    --line:    #d7e0ee;
+    --line-2:  #e4ebf5;
+    --ink:     #0d1524;
+    --mut:     #4d6082;
+    --dim:     #6b7d9c;
+
+    --fact:    #1668d6;
+    --wish:    #0f8f4d;
+    --warn:    #a5670a;
+
+    --fact-wash: rgba(22, 104, 214, 0.07);
+    --wish-wash: rgba(15, 143, 77, 0.07);
+    --warn-wash: rgba(165, 103, 10, 0.07);
+  }
+}
+
+:root[data-theme="light"] {
+  --bg:      #f6f8fc;
+  --panel:   #ffffff;
+  --panel-2: #eef2f9;
+  --line:    #d7e0ee;
+  --line-2:  #e4ebf5;
+  --ink:     #0d1524;
+  --mut:     #4d6082;
+  --dim:     #6b7d9c;
+
+  --fact:    #1668d6;
+  --wish:    #0f8f4d;
+  --warn:    #a5670a;
+
+  --fact-wash: rgba(22, 104, 214, 0.07);
+  --wish-wash: rgba(15, 143, 77, 0.07);
+  --warn-wash: rgba(165, 103, 10, 0.07);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 72px 28px 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 60px;
+}
+
+/* --- type ---------------------------------------------------------------- */
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; letter-spacing: -0.015em; }
+h1 { font-size: clamp(2.1rem, 5vw, 3rem); line-height: 1.1; font-weight: 700; }
+h2 { font-size: 1.45rem; }
+h3 { font-size: 1.02rem; font-weight: 600; }
+p  { margin: 0; max-width: var(--measure); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
+}
+
+.lede { font-size: 1.12rem; color: var(--mut); max-width: 62ch; }
+
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+p code, li code, td code {
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 0.1em 0.38em;
+}
+
+a { color: var(--fact); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--fact);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* --- structural blocks --------------------------------------------------- */
+section { display: flex; flex-direction: column; gap: 20px; }
+
+.header-rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--line-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.rule { background: var(--panel); padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
+.rule-n {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+.rule-t { font-weight: 600; font-size: 0.95rem; }
+.rule-d { font-size: 0.86rem; color: var(--mut); line-height: 1.5; }
+
+/* --- diagrams ------------------------------------------------------------
+   Styled through CSS rules rather than presentation attributes, so the theme
+   tokens actually resolve. `fill="var(--x)"` is not reliably supported.
+   ------------------------------------------------------------------------- */
+.dg text { font-family: var(--sans); }
+.dg .m       { font-family: var(--mono); }
+.dg .ink     { fill: var(--ink); }
+.dg .mut     { fill: var(--mut); }
+.dg .dim     { fill: var(--dim); }
+.dg .c-fact  { fill: var(--fact); }
+.dg .c-wish  { fill: var(--wish); }
+.dg .c-warn  { fill: var(--warn); }
+
+.dg .zone      { fill: none; stroke: var(--line); stroke-dasharray: 4 4; }
+.dg .box       { fill: var(--panel); stroke: var(--line); }
+.dg .box-fact  { fill: var(--panel); stroke: var(--fact); }
+.dg .box-wish  { fill: var(--panel); stroke: var(--wish); }
+.dg .chip-fact { fill: var(--fact-wash); stroke: var(--fact); }
+.dg .chip-wish { fill: var(--wish-wash); stroke: var(--wish); }
+
+.dg .flow       { fill: none; stroke-width: 1.5; }
+.dg .flow-fact  { stroke: var(--fact); }
+.dg .flow-wish  { stroke: var(--wish); stroke-dasharray: 5 4; }
+.dg .flow-warn  { stroke: var(--warn); stroke-dasharray: 4 4; }
+.dg .flow-plain { stroke: var(--mut); }
+
+figure { margin: 0; display: flex; flex-direction: column; gap: 14px; }
+.figure-scroll { overflow-x: auto; padding-bottom: 4px; }
+figure svg { display: block; width: 100%; min-width: 620px; height: auto; }
+figcaption { font-size: 0.88rem; color: var(--mut); max-width: var(--measure); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 20px; font-size: 0.82rem; color: var(--mut); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.swatch { width: 22px; height: 3px; border-radius: 2px; flex: none; }
+
+/* --- tables -------------------------------------------------------------- */
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 520px; }
+th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+thead th {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 500;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.who { font-family: var(--mono); font-size: 0.8rem; white-space: nowrap; }
+.who-agent { color: var(--fact); }
+.who-web { color: var(--wish); }
+
+/* --- callouts ------------------------------------------------------------ */
+.note {
+  border-left: 2px solid var(--warn);
+  background: var(--warn-wash);
+  padding: 14px 18px;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 0.92rem;
+  color: var(--ink);
+  max-width: var(--measure);
+}
+.note strong { color: var(--warn); }
+
+.keyblock {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  line-height: 1.9;
+  overflow-x: auto;
+  color: var(--mut);
+}
+.keyblock b { color: var(--fact); font-weight: 500; }
+.keyblock em { color: var(--wish); font-style: normal; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card h3 { font-size: 0.95rem; }
+.card p { font-size: 0.87rem; color: var(--mut); line-height: 1.55; }
+
+.status { display: flex; flex-direction: column; gap: 1px; background: var(--line-2); border: 1px solid var(--line-2); border-radius: var(--radius); overflow: hidden; }
+.status-row { background: var(--panel); padding: 13px 18px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+.status-tag {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 3px;
+  flex: none;
+}
+.tag-done { background: var(--wish-wash); color: var(--wish); }
+.tag-next { background: var(--fact-wash); color: var(--fact); }
+.status-text { font-size: 0.9rem; }
+.status-text span { color: var(--mut); }
+
+footer {
+  border-top: 1px solid var(--line-2);
+  padding-top: 24px;
+  font-size: 0.82rem;
+  color: var(--dim);
+  max-width: var(--measure);
+}
+</style>
+
+<div class="page">
+
+  <header>
+    <div class="eyebrow">Media Vault &middot; system design</div>
+    <h1>Two one-way flows</h1>
+    <p class="lede" style="margin-top:16px">
+      A local agent at home holds the only keys to your files. A web module in Google Cloud
+      is where you decide things. They never call each other &mdash; they meet in three
+      document shapes, and each one has exactly one writer.
+    </p>
+    <div class="header-rules" style="margin-top:32px">
+      <div class="rule">
+        <div class="rule-n">RULE 01</div>
+        <div class="rule-t">Only the agent touches files</div>
+        <div class="rule-d">The web module cannot read a byte off the NAS. It writes wishes; the agent decides whether to honour them.</div>
+      </div>
+      <div class="rule">
+        <div class="rule-n">RULE 02</div>
+        <div class="rule-t">Dry-run is the default</div>
+        <div class="rule-d">Every mutating path takes <code>commit=False</code>. A caller who forgets the flag gets a preview, never a mutation.</div>
+      </div>
+      <div class="rule">
+        <div class="rule-n">RULE 03</div>
+        <div class="rule-t">One writer per collection</div>
+        <div class="rule-d">There is no merge logic anywhere in this project, because no document ever has two authors.</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">The mechanism</div>
+    <h2>Facts go up. Wishes come down.</h2>
+    <p>
+      Bidirectional sync is where projects like this die &mdash; conflict resolution,
+      split-brain, arguments about which side won. Splitting the traffic into two
+      independent one-way flows removes that entire category of problem. The NAS is the
+      source of truth; if the cloud mirror ever disagrees, the next scan corrects it.
+    </p>
+
+    <figure>
+      <div class="figure-scroll">
+        <svg class="dg" viewBox="0 0 900 400" role="img"
+             aria-label="The local agent pushes thumbnails and item metadata up to Cloud Storage and Firestore. The React web app writes intent documents to Firestore, which the agent listens for and executes. Each arrow has a single writer.">
+          <defs>
+            <marker id="ah-fact" viewBox="0 0 10 10" refX="9" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path class="c-fact" d="M 0 0 L 10 5 L 0 10 z"/>
+            </marker>
+            <marker id="ah-wish" viewBox="0 0 10 10" refX="9" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path class="c-wish" d="M 0 0 L 10 5 L 0 10 z"/>
+            </marker>
+          </defs>
+
+          <!-- ---------- zone: home ---------- -->
+          <rect class="zone" x="16" y="52" width="228" height="300" rx="8"/>
+          <text class="m dim" x="30" y="40" font-size="11" letter-spacing="1.4">HOME</text>
+
+          <rect class="box" x="44" y="88" width="172" height="66" rx="6"/>
+          <text class="ink" x="130" y="115" text-anchor="middle" font-size="13" font-weight="600">NAS</text>
+          <text class="m dim" x="130" y="134" text-anchor="middle" font-size="10.5">source of truth</text>
+
+          <rect class="box-fact" x="44" y="196" width="172" height="90" rx="6"/>
+          <text class="ink" x="130" y="223" text-anchor="middle" font-size="13" font-weight="600">Local agent</text>
+          <text class="m dim" x="130" y="242" text-anchor="middle" font-size="10.5">python</text>
+          <text class="m dim" x="130" y="264" text-anchor="middle" font-size="10.5">scan &middot; hash &middot; act</text>
+
+          <!-- nas -> agent -->
+          <line class="flow flow-fact" x1="130" y1="154" x2="130" y2="190" marker-end="url(#ah-fact)"/>
+          <text class="m mut" x="140" y="177" font-size="10">reads</text>
+
+          <!-- ---------- zone: cloud ---------- -->
+          <rect class="zone" x="330" y="52" width="268" height="300" rx="8"/>
+          <text class="m dim" x="344" y="40" font-size="11" letter-spacing="1.4">GOOGLE CLOUD</text>
+
+          <rect class="box" x="356" y="76" width="216" height="58" rx="6"/>
+          <text class="ink" x="464" y="100" text-anchor="middle" font-size="12.5" font-weight="600">Cloud Storage</text>
+          <text class="m dim" x="464" y="118" text-anchor="middle" font-size="10">thumbs/ &middot; previews/</text>
+
+          <rect class="box" x="356" y="152" width="216" height="176" rx="6"/>
+          <text class="ink" x="464" y="176" text-anchor="middle" font-size="12.5" font-weight="600">Firestore</text>
+
+          <rect class="chip-fact" x="374" y="192" width="180" height="34" rx="4"/>
+          <text class="m c-fact" x="386" y="213" font-size="10.5">items/</text>
+          <text class="m dim" x="544" y="213" text-anchor="end" font-size="9.5">facts</text>
+
+          <rect class="chip-wish" x="374" y="234" width="180" height="34" rx="4"/>
+          <text class="m c-wish" x="386" y="255" font-size="10.5">intents/</text>
+          <text class="m dim" x="544" y="255" text-anchor="end" font-size="9.5">wishes</text>
+
+          <rect class="chip-fact" x="374" y="276" width="180" height="34" rx="4"/>
+          <text class="m c-fact" x="386" y="297" font-size="10.5">actions/</text>
+          <text class="m dim" x="544" y="297" text-anchor="end" font-size="9.5">records</text>
+
+          <!-- ---------- agent -> cloud (facts) ---------- -->
+          <path class="flow flow-fact" d="M 216 214 C 280 214, 292 105, 350 105" marker-end="url(#ah-fact)"/>
+          <text class="m c-fact" x="252" y="140" font-size="10">pushes thumbs</text>
+
+          <path class="flow flow-fact" d="M 216 232 C 268 232, 300 209, 368 209" marker-end="url(#ah-fact)"/>
+          <text class="m c-fact" x="244" y="250" font-size="10">upserts items</text>
+
+          <!-- ---------- cloud -> agent (wishes) ---------- -->
+          <path class="flow flow-wish" d="M 368 262 C 300 262, 268 292, 216 272" marker-end="url(#ah-wish)"/>
+          <text class="m c-wish" x="236" y="308" font-size="10">listens for intents</text>
+
+          <!-- ---------- zone: browser ---------- -->
+          <rect class="box-wish" x="684" y="152" width="200" height="120" rx="6"/>
+          <text class="ink" x="784" y="192" text-anchor="middle" font-size="13" font-weight="600">Web module</text>
+          <text class="m dim" x="784" y="212" text-anchor="middle" font-size="10.5">react &middot; firebase</text>
+          <text class="m dim" x="784" y="234" text-anchor="middle" font-size="10.5">you decide here</text>
+
+          <!-- browser -> firestore (writes intent) -->
+          <path class="flow flow-wish" d="M 684 196 C 640 196, 620 251, 560 251" marker-end="url(#ah-wish)"/>
+          <text class="m c-wish" x="614" y="188" text-anchor="middle" font-size="10">writes intent</text>
+
+          <!-- firestore -> browser (reads) -->
+          <path class="flow flow-fact" d="M 560 214 C 620 214, 640 240, 684 240" marker-end="url(#ah-fact)"/>
+          <text class="m c-fact" x="626" y="272" text-anchor="middle" font-size="10">reads items</text>
+
+          <!-- storage -> browser -->
+          <path class="flow flow-fact" d="M 572 100 C 660 100, 700 138, 760 148" marker-end="url(#ah-fact)"/>
+          <text class="m c-fact" x="668" y="92" text-anchor="middle" font-size="10">fetches images</text>
+        </svg>
+      </div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--fact)"></i> Facts &mdash; written by the agent, read by the web</span>
+        <span><i class="swatch" style="background:var(--wish);opacity:.9"></i> Wishes &mdash; written by the web, executed by the agent</span>
+      </div>
+      <figcaption>
+        No arrow runs both ways. The web module's only write is an intent document; every
+        other cloud write comes from the agent. That is what removes merge logic from the
+        design entirely.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Where things live</div>
+    <h2>Three collections, three owners</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Collection</th><th>Written by</th><th>Read by</th><th>Holds</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>items/</code></td>
+            <td class="who who-agent">agent</td>
+            <td class="who">web</td>
+            <td>A fact. This file exists on the NAS, is this big, hashes to this, and its thumbnail is at this key.</td>
+          </tr>
+          <tr>
+            <td><code>intents/</code></td>
+            <td class="who who-web">web</td>
+            <td class="who">agent</td>
+            <td>A wish. Please delete this / fetch this / move this. The agent writes back <code>status</code> and <code>result</code>.</td>
+          </tr>
+          <tr>
+            <td><code>actions/</code></td>
+            <td class="who who-agent">agent</td>
+            <td class="who">web</td>
+            <td>A record. This happened, with these inputs, at this time. Append-only mirror of the agent's local journal.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>intents/</code> is the one document with two hands on it, so the split is by
+      field: the web module owns <code>type</code>, <code>item_id</code> and
+      <code>params</code> and never touches the outcome; the agent owns
+      <code>status</code> and <code>result</code> and never rewrites the request. Both
+      sides validate against the same JSON Schema in <code>shared/contracts/</code>, so a
+      shape change breaks both modules in the same commit rather than silently.
+    </p>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Thumbnails</div>
+    <h2>Name blobs by content, never by path</h2>
+    <p>
+      This is the single most load-bearing decision in the sync design. Every derived
+      image is keyed by the hash of the file it came from &mdash; not by where that file
+      currently sits.
+    </p>
+
+    <div class="keyblock">
+      <b>thumbs/</b>15423a9f3c1.webp            <em>&larr; 400px WebP, ~30 KB, permanent</em><br>
+      <b>previews/preview/</b>15423a9f3c1.jpg   <em>&larr; 2048px JPEG, ~500 KB, expires in 1 day</em><br>
+      <b>previews/original/</b>15423a9f3c1.jpg  <em>&larr; untouched bytes, expires in 1 day</em>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Uploads become idempotent</h3>
+        <p>A re-scan derives the same key, so a <code>HEAD</code> check short-circuits the upload. This is exactly what closes the consumer-idempotency gap: a replayed intent finds the blob already there and reports <code>no-op</code> without touching the NAS.</p>
+      </div>
+      <div class="card">
+        <h3>Duplicates collapse for free</h3>
+        <p>Two copies of the same photo &mdash; one on the NAS, one in a Takeout export &mdash; hash identically and share one blob. No dedup pass required to get the storage saving.</p>
+      </div>
+      <div class="card">
+        <h3>Renames cost nothing</h3>
+        <p>Moving a file on the NAS invalidates no blob and triggers no re-upload. Only the pointer in <code>items/</code> changes.</p>
+      </div>
+    </div>
+
+    <p>
+      The hash itself never reads a whole file: it is the size plus a SHA-1 of the first
+      and last 64&nbsp;KB. Reading a terabyte over a network mount just to fingerprint it
+      is not an acceptable cost, and for distinguishing photos this is plenty.
+    </p>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Full resolution</div>
+    <h2>Looking at a photo is an intent too</h2>
+    <p>
+      Thumbnails are enough to decide <em>keep or bin</em>, but not to actually look at
+      something. The full-resolution bytes stay at home &mdash; so viewing one becomes a
+      request like any other, and you pay egress only on what you actually opened.
+    </p>
+
+    <figure>
+      <div class="figure-scroll">
+        <svg class="dg" viewBox="0 0 860 156" role="img"
+             aria-label="An intent moves through four states: pending, then claimed when the agent takes it, then either done or failed. It never moves backwards. A claim older than 600 seconds may be reclaimed.">
+          <defs>
+            <marker id="ah-plain" viewBox="0 0 10 10" refX="9" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path class="mut" d="M 0 0 L 10 5 L 0 10 z"/>
+            </marker>
+            <marker id="ah-warn" viewBox="0 0 10 10" refX="9" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path class="c-warn" d="M 0 0 L 10 5 L 0 10 z"/>
+            </marker>
+          </defs>
+
+          <rect class="chip-wish" x="14" y="42" width="140" height="46" rx="6"/>
+          <text class="m c-wish" x="84" y="70" text-anchor="middle" font-size="12">pending</text>
+
+          <line class="flow flow-plain" x1="156" y1="65" x2="230" y2="65" marker-end="url(#ah-plain)"/>
+          <text class="m dim" x="193" y="54" text-anchor="middle" font-size="9.5">claim</text>
+
+          <rect class="box" x="238" y="42" width="140" height="46" rx="6"/>
+          <text class="m ink" x="308" y="70" text-anchor="middle" font-size="12">claimed</text>
+
+          <path class="flow flow-plain" d="M 380 58 C 432 58, 442 32, 490 32" marker-end="url(#ah-plain)"/>
+          <path class="flow flow-plain" d="M 380 74 C 432 74, 442 100, 490 100" marker-end="url(#ah-plain)"/>
+
+          <rect class="chip-fact" x="496" y="10" width="128" height="44" rx="6"/>
+          <text class="m c-fact" x="560" y="37" text-anchor="middle" font-size="12">done</text>
+
+          <rect class="box" x="496" y="78" width="128" height="44" rx="6"/>
+          <text class="m mut" x="560" y="105" text-anchor="middle" font-size="12">failed</text>
+
+          <path class="flow flow-warn" d="M 308 90 C 308 134, 196 136, 156 106" marker-end="url(#ah-warn)"/>
+          <text class="m c-warn" x="238" y="150" text-anchor="middle" font-size="9.5">lease expires &middot; 600s</text>
+
+          <text class="m dim" x="638" y="37" font-size="10">result carries the blob key</text>
+          <text class="m dim" x="638" y="105" font-size="10">result carries the error</text>
+        </svg>
+      </div>
+      <figcaption>
+        States move forward only. The one backwards edge is a lease expiring &mdash; an agent
+        that crashed mid-run leaves a stale claim, and after ten minutes the intent becomes
+        available again.
+      </figcaption>
+    </figure>
+
+    <p>
+      Two variants. <code>preview</code> is a 2048px JPEG at around 500&nbsp;KB &mdash; the
+      default, and what you want for judging a photo. <code>original</code> is the untouched
+      bytes, for when you actually want the file; a 50&nbsp;MB RAW costs about half a cent
+      in egress, which is fine occasionally and wrong as a default.
+    </p>
+
+    <div class="note">
+      <strong>One rule is load-bearing:</strong> a lifecycle rule on the bucket must delete
+      <code>previews/</code> after a day. Thumbnails are permanent; previews are disposable
+      by design, and without that rule they accumulate silently and turn a fixed 6&nbsp;GB
+      mirror into a growing one.
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Deduplication</div>
+    <h2>Within a source, never across it</h2>
+    <p>
+      The NAS holds everything. Drive holds a curated copy of the good things.
+      Amazon receives the occasional push so something shows up on a TV. So a photo
+      existing in both the NAS and Drive is <em>the system working</em> &mdash; and
+      the grouping query is scoped to one source precisely so that pair is
+      unreachable by any code path here.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Exact &rarr; archived automatically</h3>
+        <p>Identical bytes, confirmed by a full SHA-256 across the group. One copy always survives; the rest move to trash and stay recoverable.</p>
+      </div>
+      <div class="card">
+        <h3>Near &rarr; flagged for review</h3>
+        <p>A re-compression or a resize is <em>similar</em>, not identical, and one of the pair is usually the better file. That call is yours, so it never happens automatically.</p>
+      </div>
+      <div class="card">
+        <h3>The survivor is the oldest</h3>
+        <p>Tie-broken by shallowest path, then alphabetically. Deterministic, so a second run proposes exactly the same thing &mdash; and the dry-run names the keeper for every group.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>A fingerprint match is not proof.</strong> <code>quick_hash</code> is the
+      file size plus a hash of the first and last 64&nbsp;KB, so two files can share
+      one and still differ in the middle &mdash; unlikely for photos, entirely
+      plausible for video. Anything above 128&nbsp;KB is fully hashed before it is
+      archived. Below that, the two windows already overlap and cover every byte,
+      so no second read is needed.
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Cost</div>
+    <h2>What this actually runs at</h2>
+    <p>Assuming roughly 200,000 photos and a ~6&nbsp;GB thumbnail mirror.</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Line</th><th>Basis</th><th>Cost</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Cloud Storage</td><td>~6 GB of thumbnails at ~$0.020/GB</td><td class="num">~$0.12 / mo</td></tr>
+          <tr><td>Firestore</td><td>~100 MB of documents &mdash; inside the 1 GB free tier</td><td class="num">$0</td></tr>
+          <tr><td>Firebase Hosting</td><td>Free tier</td><td class="num">$0</td></tr>
+          <tr><td>Egress</td><td>Thumbnails are tiny; previews expire daily</td><td class="num">pennies</td></tr>
+          <tr>
+            <td>Initial thumbnail upload</td>
+            <td>200k write ops at ~$0.005/1,000 &mdash; <strong>one-time, and not on the scorecard</strong></td>
+            <td class="num">~$1.00 once</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <strong>Budget time, not just money.</strong> Deriving 200,000 thumbnails is roughly an
+      hour of CPU even parallelised across cores. That is precisely why the scan checkpoint
+      matters &mdash; a crash at 80% must not restart from zero.
+    </div>
+    <p style="font-size:0.86rem;color:var(--dim)">
+      Prices are approximate and worth re-checking against current GCP pricing before you commit.
+    </p>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Stack</div>
+    <h2>Firebase, and no backend service at all</h2>
+    <p>
+      For a single-user system, Firebase Auth + Firestore + Storage + Hosting with security
+      rules locked to one account means there is no server in the middle. React talks to
+      Firestore directly. Nothing idles, nothing needs patching, and there is no container
+      to keep warm.
+    </p>
+    <div class="cards">
+      <div class="card">
+        <h3>Why not Cloud Run</h3>
+        <p>A relay service would exist only to forward reads the client SDK can already make safely. Security rules do that job with no compute and no cost.</p>
+      </div>
+      <div class="card">
+        <h3>Listen, don't poll</h3>
+        <p>Polling Firestore every 5s burns ~17k reads/day out of a 50k free tier while doing nothing. A snapshot listener bills only on real changes &mdash; with a slow 5-minute poll behind it in case the connection drops.</p>
+      </div>
+      <div class="card">
+        <h3>Deploys from GitHub Actions</h3>
+        <p>Firebase Hosting has a first-party action, so the web module ships on push with a service-account secret and no custom pipeline.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section>
+    <div class="eyebrow">Status</div>
+    <h2>Built, and next</h2>
+    <div class="status">
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">Connectors for NAS, Drive, archive and Amazon <span>&mdash; one adapter per source behind a single port</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">Action layer with dry-run gate and append-only journal <span>&mdash; delete, copy, move, thumbnail, fetch full-res</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">Intent registry and dispatcher <span>&mdash; the entire surface area the web module is allowed to ask for</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">SQLite catalog with a resumable scanner <span>&mdash; checkpoints every directory, so a 1 TB pass survives a crash</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">Within-source deduplication with full-content verification <span>&mdash; archives to trash, never across sources</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">A <code>doctor</code> preflight check <span>&mdash; names every unconfigured path and the exact fix</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-done">built</span>
+        <span class="status-text">Contracts, CI, and a test suite that needs no cloud account <span>&mdash; 27 tests; GitHub Actions publishes a multi-arch image to GHCR</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-next">next</span>
+        <span class="status-text">Wire the real GCS and Firestore clients <span>&mdash; both adapters are stubbed behind live flags that default to off</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-next">next</span>
+        <span class="status-text">Perceptual near-duplicate review queue <span>&mdash; surfaced in the UI, never archived automatically</span></span>
+      </div>
+      <div class="status-row">
+        <span class="status-tag tag-next">next</span>
+        <span class="status-text">The web module <span>&mdash; React on Firebase Hosting, reading items and writing intents</span></span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Patterns: Ports &amp; Adapters (Cockburn) &middot; Command &middot; Transactional Outbox
+    (Richardson) &middot; content-addressed storage. Scoped for a single-user personal
+    system &mdash; not multi-tenant, no HA, no SLOs.
+  </footer>
+
+</div>
