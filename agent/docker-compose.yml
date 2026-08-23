@@ -23,6 +23,8 @@ services:
       # ---- NAS share (SOURCE OF TRUTH) ------------------------------------- #
       # READ-ONLY by default (the ':ro' suffix) so a bug can never harm it.
       # The agent only needs write access to the trash subfolder (mounted below).
+      # Ignored entirely when NAS_MODE=smb (see .env.example) — the agent then
+      # reaches the NAS over the network instead of through this mount.
       - "${HOST_NAS_PATH:-../sample/nas}:/data/nas:ro"
 
       # ---- Writable trash (soft-delete lands here) ------------------------- #

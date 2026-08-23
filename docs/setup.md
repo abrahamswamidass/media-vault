@@ -94,6 +94,32 @@ CLI:
 Green means ready. Anything red prints the exact fix beneath it. Everything below
 is optional — indexing and dedup work with just the NAS configured.
 
+### If the NAS mount is empty on Windows
+
+Docker Desktop can't reliably bind-mount a **mapped network drive** (`Z:\...`)
+into its Linux VM — the container sees the mount point but the share's actual
+files don't come through, so `doctor` reports a real directory with 0 entries
+and `index` finds nothing. Local disks (`C:\...`) don't have this problem.
+
+If that's what you're hitting, switch the NAS connector to **SMB-direct
+mode**: it skips the OS mount entirely and talks SMB2/3 to the NAS over the
+network from inside the container.
+
+```ini
+NAS_MODE=smb
+NAS_HOST=192.168.6.110      # your NAS's IP or hostname
+NAS_SHARE=homes             # the SMB share name
+NAS_SMB_ROOT=winfredbe/nov2025-cafc   # path inside the share
+NAS_SMB_TRASH=winfredbe/nov2025-cafc/_trash   # optional; defaults to <root>/_trash
+NAS_USER=winfredbe
+NAS_PASSWORD_FILE=/secrets/nas_password.txt   # a file, not the password itself
+```
+
+Put the password in `secrets/nas_password.txt` (plain text, one line) — never
+directly in `.env`. With `NAS_MODE=smb`, `HOST_NAS_PATH`/`HOST_TRASH_PATH` and
+the NAS volume mounts in `docker-compose.yml` are ignored. Re-run `doctor` —
+it now checks `NAS_HOST`/`NAS_SHARE`/credentials instead of the mount path.
+
 ---
 
 ## Google Drive (optional)

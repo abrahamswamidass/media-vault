@@ -9,9 +9,34 @@ from .archive import ArchiveConnector
 from .amazon import AmazonConnector
 
 
+def _read_secret(path: str | None) -> str | None:
+    """Read a one-line secret (e.g. a password) from a file, or None if unset."""
+    if not path:
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+
 def build_connector(name: str, args):
     """Factory used by the CLI. Pulls paths from --root/flags or environment."""
     if name == "nas":
+        if os.getenv("NAS_MODE", "mount") == "smb":
+            # Direct SMB2/3 client, bypassing the OS mount. See nas_smb.py for why
+            # this exists (Docker Desktop on Windows can't reliably bind-mount a
+            # mapped network drive).
+            from .nas_smb import SMBNASConnector
+
+            host = os.getenv("NAS_HOST")
+            share = os.getenv("NAS_SHARE")
+            if not host or not share:
+                raise SystemExit("NAS_MODE=smb needs NAS_HOST and NAS_SHARE set")
+            return SMBNASConnector(
+                host, share,
+                root=args.root or os.getenv("NAS_SMB_ROOT", ""),
+                trash=args.trash or os.getenv("NAS_SMB_TRASH"),
+                username=os.getenv("NAS_USER"),
+                password=_read_secret(os.getenv("NAS_PASSWORD_FILE")),
+            )
         root = args.root or os.getenv("NAS_ROOT")
         if not root:
             raise SystemExit("nas needs --root <path> (or set NAS_ROOT)")

@@ -85,14 +85,31 @@ def run_checks() -> list[Check]:
     env = os.environ.get
 
     # --- 1. NAS: the source of truth. Nothing works without this. --------- #
-    checks.append(_dir_check(
-        "NAS", "share", env("NAS_ROOT"), need_write=False, required=True,
-        fix="Set HOST_NAS_PATH in agent/.env to your share, e.g. /mnt/nas/Photos "
-            "or //DISKSTATION/Photos. It is mounted read-only on purpose."))
-    checks.append(_dir_check(
-        "NAS", "trash", env("NAS_TRASH"), need_write=True, required=True,
-        fix="Set HOST_TRASH_PATH in agent/.env. Deletes and archived duplicates "
-            "move here, so it must be writable and on the same volume as the share."))
+    if env("NAS_MODE", "mount") == "smb":
+        host, share = env("NAS_HOST"), env("NAS_SHARE")
+        if host and share:
+            checks.append(Check("NAS", "share", OK, f"smb://{host}/{share}/{env('NAS_SMB_ROOT', '')}"))
+        else:
+            checks.append(Check(
+                "NAS", "share", FAIL, "NAS_HOST and/or NAS_SHARE not set",
+                "NAS_MODE=smb needs NAS_HOST (e.g. 192.168.6.110) and NAS_SHARE "
+                "(e.g. homes) set in agent/.env."))
+        checks.append(_file_check(
+            "NAS", "smb credentials", env("NAS_PASSWORD_FILE"), required=False,
+            fix="Set NAS_USER and NAS_PASSWORD_FILE in agent/.env if the share "
+                "needs auth. NAS_PASSWORD_FILE points at a file under secrets/ "
+                "holding the password (never the password itself in .env)."))
+    else:
+        checks.append(_dir_check(
+            "NAS", "share", env("NAS_ROOT"), need_write=False, required=True,
+            fix="Set HOST_NAS_PATH in agent/.env to your share, e.g. /mnt/nas/Photos "
+                "or //DISKSTATION/Photos. It is mounted read-only on purpose. If a "
+                "mapped Windows drive mounts empty in Docker Desktop, try "
+                "NAS_MODE=smb instead (talks SMB directly, no OS mount needed)."))
+        checks.append(_dir_check(
+            "NAS", "trash", env("NAS_TRASH"), need_write=True, required=True,
+            fix="Set HOST_TRASH_PATH in agent/.env. Deletes and archived duplicates "
+                "move here, so it must be writable and on the same volume as the share."))
 
     # --- 2. Google Drive: OAuth, one-time, interactive. ------------------- #
     drive_live = env("DRIVE_LIVE", "0") == "1"
