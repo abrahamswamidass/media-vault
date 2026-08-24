@@ -32,9 +32,10 @@ agent/           Module 1 — local Python. The only thing that touches files.
   tests/
 web/             Module 2 — Firebase Hosting. Currently a minimal static
                  read-only viewer (index.html/app.js/style.css, no build
-                 step, no auth) — a placeholder MVP, not the eventual React
-                 app. Reads `items` from Firestore, renders public thumbnail
-                 URLs. See docs/setup.md's "Web viewer" section.
+                 step) — a placeholder MVP, not the eventual React app.
+                 Single-user Google sign-in; access is gated server-side by
+                 firestore.rules/storage.rules (owner email hardcoded there),
+                 not by hiding the URL. See docs/setup.md's "Web viewer".
 shared/contracts/ JSON Schema both modules validate against. Change here first.
 docs/            architecture.html, setup.md, command-catalog.html
 ```

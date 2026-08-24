@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// Same single-user gate as firestore.rules, for the bucket holding
+// thumbnails. Deploy this against the "mymediavault" bucket specifically
+// (see docs/setup.md's "Web viewer" section) — Firebase Storage rules are
+// per-bucket, not shared automatically across additional buckets.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /thumbs/{fileName} {
+      allow read: if request.auth != null
+                  && request.auth.token.email == "winfredbe@gmail.com";
+      allow write: if false;
+    }
+    // Everything else (previews/, any future originals mirror) stays denied
+    // by default — only thumbs/ is ever meant to be browser-readable.
+  }
+}

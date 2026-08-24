@@ -207,70 +207,81 @@ pushes real thumbnails to the bucket and metadata documents to Firestore's
 
 ## Web viewer
 
-`web/` is a minimal static page — no build step, no auth — that reads the
-`items` Firestore collection and shows a thumbnail grid. It's an MVP
-placeholder, not the eventual React app. Tradeoff: because there's no auth
-yet, both the Firestore data and the thumbnails end up **publicly readable to
-anyone with the URL** (unlisted, not indexed, but not access-controlled).
-Fine for a personal quick-look; revisit before sharing the URL with anyone.
+`web/` is a minimal static page — no build step, single-user Google
+sign-in — that reads the `items` Firestore collection and shows a thumbnail
+grid. It's an MVP placeholder, not the eventual React app. Access is gated
+server-side by `firestore.rules` and `storage.rules`, both hardcoded to one
+owner email — not by hiding the URL. GCS's `allUsers` IAM grant explicitly
+cannot be scoped to a prefix (Google rejects conditions on public principals),
+so this is the actual private-by-default path, not a workaround.
 
-### 1. Make `thumbs/` publicly readable
-
-Only the thumbnail prefix — never `previews/` (full-res, expires after a day)
-or the originals, which stay untouched on the NAS.
-
-```powershell
-gcloud storage buckets add-iam-policy-binding gs://your-bucket-name `
-  --member="allUsers" `
-  --role="roles/storage.objectViewer" `
-  --condition="expression=resource.name.startsWith(\"projects/_/buckets/your-bucket-name/objects/thumbs/\"),title=public-thumbs-only"
-```
-
-No `gcloud` installed? Do the same thing in the console: **Cloud Storage →
-your bucket → Permissions → Grant Access** → principal `allUsers`, role
-**Storage Object Viewer**, then click **Add condition** and set it to
-`resource.name.startsWith("projects/_/buckets/your-bucket-name/objects/thumbs/")`.
-
-### 2. Allow public reads in Firestore
-
-**Firestore → Rules** (in your database, e.g. `media-vault-store`) → paste
-the contents of `firestore.rules` from the repo root → **Publish**.
-
-### 3. Add Firebase to the project and get a web app config
+### 1. Add Firebase to the project
 
 1. [Firebase console](https://console.firebase.google.com) → **Add project**
    → pick your *existing* GCP project (don't create a new one).
 2. Project settings → **Your apps** → **Add app** → **Web**.
 3. Copy the `firebaseConfig` object it shows you.
 
-### 4. Fill in the config
+### 2. Enable Google sign-in
+
+**Authentication → Sign-in method → Add new provider → Google** → enable it.
+No allowlist needed here — the rules below do the actual gating.
+
+### 3. Link the existing GCS bucket into Firebase Storage
+
+**Storage** → if this is the first time enabling Storage, it prompts you to
+pick a Cloud Storage bucket — choose the one the agent already uses (e.g.
+`mymediavault`) rather than letting it create a new default bucket. If
+Storage is already enabled with a different default bucket, use the bucket
+dropdown at the top of the Storage page → **Add Cloud Storage bucket** →
+select the agent's bucket there instead.
+
+### 4. Publish both rule sets
+
+- **Firestore → Rules** (on your database, e.g. `media-vault-store`) → paste
+  in `firestore.rules` from the repo root → **Publish**.
+- **Storage → Rules** → make sure the bucket selector at the top is set to
+  the agent's bucket (from step 3) → paste in `storage.rules` from the repo
+  root → **Publish**.
+
+Both files already have `winfredbe@gmail.com` hardcoded as the only allowed
+reader — edit that line in both files first if it should be a different
+account.
+
+### 5. Fill in the config
 
 Edit `web/firebase-config.js` in the repo:
 
 ```js
 export const firebaseConfig = {
-  apiKey: "...",        // from step 3
-  authDomain: "...",    // from step 3
-  projectId: "...",     // from step 3
+  apiKey: "...",        // from step 1
+  authDomain: "...",    // from step 1
+  projectId: "...",     // from step 1
 };
 export const FIRESTORE_DATABASE = "your-database-name"; // e.g. media-vault-store
 export const GCS_BUCKET = "your-bucket-name";
+export const OWNER_EMAIL = "winfredbe@gmail.com";
 ```
 
 None of this is secret — Firebase web API keys are safe to commit; access is
-controlled by the security rules in step 2, not by hiding this file.
+controlled by the security rules in step 4, not by hiding this file.
+`OWNER_EMAIL` here only controls which screen the page shows (signed-in vs.
+"not authorized") — it is not what makes this private.
 
-### 5. Preview locally (optional but fast)
+### 6. Preview locally (optional but fast)
 
 ```powershell
 cd web
 python -m http.server 8000
 ```
 
-Open `http://localhost:8000` — if steps 1–4 are right, you'll see the
-thumbnail grid immediately, no deploy needed yet.
+Open `http://localhost:8000`, click **Sign in with Google**, and use the
+`winfredbe@gmail.com` account — if steps 1–5 are right, you'll see the
+thumbnail grid, no deploy needed yet. Any other Google account gets a clean
+"not authorized" message, and the security rules reject it either way even if
+the client-side check were somehow bypassed.
 
-### 6. Deploy
+### 7. Deploy
 
 ```powershell
 npm install -g firebase-tools
@@ -279,4 +290,7 @@ firebase use --add          # pick your project when prompted
 firebase deploy --only hosting
 ```
 
-Prints a live `https://your-project.web.app` URL when done.
+Prints a live `https://your-project.web.app` URL when done. Also add that
+exact URL to **Authentication → Settings → Authorized domains** in the
+Firebase console if sign-in fails there with an unauthorized-domain error
+(localhost and the default `web.app` domain are usually pre-authorized).

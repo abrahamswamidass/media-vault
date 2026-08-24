@@ -14,5 +14,11 @@ export const firebaseConfig = {
 export const FIRESTORE_DATABASE = "media-vault-store";
 
 // The GCS bucket the agent's GCS_BUCKET env var points at — where thumbnails
-// actually live. Used to build public thumbnail URLs directly.
+// actually live. Linked into Firebase Storage (see docs/setup.md) so
+// Storage security rules gate access to it.
 export const GCS_BUCKET = "mymediavault";
+
+// The only Google account allowed to sign in. Client-side check here is only
+// for UI state (which screen to show) — the real enforcement is the matching
+// check in firestore.rules and storage.rules, which run server-side.
+export const OWNER_EMAIL = "winfredbe@gmail.com";
