@@ -202,3 +202,81 @@ docker exec media-vault-container python -m mediavault.cli publish nas --commit
 
 pushes real thumbnails to the bucket and metadata documents to Firestore's
 `items` collection.
+
+---
+
+## Web viewer
+
+`web/` is a minimal static page — no build step, no auth — that reads the
+`items` Firestore collection and shows a thumbnail grid. It's an MVP
+placeholder, not the eventual React app. Tradeoff: because there's no auth
+yet, both the Firestore data and the thumbnails end up **publicly readable to
+anyone with the URL** (unlisted, not indexed, but not access-controlled).
+Fine for a personal quick-look; revisit before sharing the URL with anyone.
+
+### 1. Make `thumbs/` publicly readable
+
+Only the thumbnail prefix — never `previews/` (full-res, expires after a day)
+or the originals, which stay untouched on the NAS.
+
+```powershell
+gcloud storage buckets add-iam-policy-binding gs://your-bucket-name `
+  --member="allUsers" `
+  --role="roles/storage.objectViewer" `
+  --condition="expression=resource.name.startsWith(\"projects/_/buckets/your-bucket-name/objects/thumbs/\"),title=public-thumbs-only"
+```
+
+No `gcloud` installed? Do the same thing in the console: **Cloud Storage →
+your bucket → Permissions → Grant Access** → principal `allUsers`, role
+**Storage Object Viewer**, then click **Add condition** and set it to
+`resource.name.startsWith("projects/_/buckets/your-bucket-name/objects/thumbs/")`.
+
+### 2. Allow public reads in Firestore
+
+**Firestore → Rules** (in your database, e.g. `media-vault-store`) → paste
+the contents of `firestore.rules` from the repo root → **Publish**.
+
+### 3. Add Firebase to the project and get a web app config
+
+1. [Firebase console](https://console.firebase.google.com) → **Add project**
+   → pick your *existing* GCP project (don't create a new one).
+2. Project settings → **Your apps** → **Add app** → **Web**.
+3. Copy the `firebaseConfig` object it shows you.
+
+### 4. Fill in the config
+
+Edit `web/firebase-config.js` in the repo:
+
+```js
+export const firebaseConfig = {
+  apiKey: "...",        // from step 3
+  authDomain: "...",    // from step 3
+  projectId: "...",     // from step 3
+};
+export const FIRESTORE_DATABASE = "your-database-name"; // e.g. media-vault-store
+export const GCS_BUCKET = "your-bucket-name";
+```
+
+None of this is secret — Firebase web API keys are safe to commit; access is
+controlled by the security rules in step 2, not by hiding this file.
+
+### 5. Preview locally (optional but fast)
+
+```powershell
+cd web
+python -m http.server 8000
+```
+
+Open `http://localhost:8000` — if steps 1–4 are right, you'll see the
+thumbnail grid immediately, no deploy needed yet.
+
+### 6. Deploy
+
+```powershell
+npm install -g firebase-tools
+firebase login
+firebase use --add          # pick your project when prompted
+firebase deploy --only hosting
+```
+
+Prints a live `https://your-project.web.app` URL when done.

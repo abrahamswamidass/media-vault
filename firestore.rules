@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// Public, unlisted read access to published item metadata — no auth for the
+// MVP viewer (see docs/setup.md's "Web viewer" section for the tradeoff).
+// Writes are always denied here: the agent writes via a service-account
+// Admin client, which bypasses these rules entirely, so `intents/` staying
+// web-writable would need its own rule when that lands.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /items/{itemId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

@@ -18,3 +18,8 @@ data/catalog/*
 
 # OS / editor
 .DS_Store
+
+# Firebase CLI local state
+.firebase/
+firebase-debug.log
+.firebaserc

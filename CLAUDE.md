@@ -30,7 +30,11 @@ agent/           Module 1 — local Python. The only thing that touches files.
     doctor.py      preflight config check
     cli.py
   tests/
-web/             Module 2 — React on Firebase Hosting. Not yet built.
+web/             Module 2 — Firebase Hosting. Currently a minimal static
+                 read-only viewer (index.html/app.js/style.css, no build
+                 step, no auth) — a placeholder MVP, not the eventual React
+                 app. Reads `items` from Firestore, renders public thumbnail
+                 URLs. See docs/setup.md's "Web viewer" section.
 shared/contracts/ JSON Schema both modules validate against. Change here first.
 docs/            architecture.html, setup.md, command-catalog.html
 ```
