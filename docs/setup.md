@@ -28,6 +28,7 @@ docker run -d --name media-vault-container --user root `
   -e NAS_USER=winfredbe `
   -e 'NAS_PASSWORD=your-password-here' `
   -v "C:\mediavault\catalog:/data/catalog" `
+  -v "C:\mediavault\secrets:/secrets" `
   ghcr.io/abrahamswamidass/media-vault/agent:latest `
   sleep infinity
 ```
@@ -52,6 +53,9 @@ Notes:
   connection fails with `STATUS_LOGON_FAILURE`.
 - **`C:\mediavault\catalog`** — any local folder; holds the index database
   between runs. Create it first if it doesn't exist.
+- **`C:\mediavault\secrets`** — any local folder; mounted read-only at
+  `/secrets` for credential files (e.g. the GCS service-account key used
+  below). Create it first if it doesn't exist. Safe to mount even if empty.
 - `sleep infinity` keeps the container running so you can `exec` into it
   repeatedly instead of creating a new container per command.
 
@@ -119,18 +123,28 @@ path directly.
 
 ## Cloud mirror (optional)
 
-Needed only for thumbnails in a future browser UI.
+`GCSBlobStore` is a real client (not a stub) — it's where thumbnails/previews
+will land once the bulk-thumbnail pass is built. Set it up now if you want to
+smoke-test uploads today.
 
 1. **Cloud Storage → Create bucket.** Single region, Standard class.
 2. **Add a lifecycle rule: delete objects under `previews/` after 1 day.**
    This one is load-bearing — without it, full-res fetches accumulate forever.
 3. **IAM → Service Accounts → Create.** Grant *Storage Object Admin* and
    *Cloud Datastore User*.
-4. Download the key JSON, mount it into the container, and add:
+4. Download the key JSON into `C:\mediavault\secrets` (already mounted at
+   `/secrets` by the base `docker run` command in step 2), then add these env
+   vars to that command:
 
 ```powershell
-  -v "C:\mediavault\secrets:/secrets" `
   -e GCS_LIVE=1 `
   -e GCS_BUCKET=your-bucket-name `
   -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/your-key.json `
+```
+
+5. `doctor` confirms the bucket and key are found. To smoke-test an actual
+   upload (there's no bulk-thumbnail CLI command yet):
+
+```powershell
+docker exec media-vault-container python -c "from mediavault.blobstore import GCSBlobStore; b = GCSBlobStore(); b.put('test/hello.txt', b'hello world'); print(b.exists('test/hello.txt')); print(b.url('test/hello.txt'))"
 ```
