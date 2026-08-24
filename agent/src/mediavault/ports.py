@@ -77,6 +77,24 @@ class BlobStore(ABC):
 
 
 # --------------------------------------------------------------------------- #
+# The facts port — where cataloged metadata goes for the web module to read
+# --------------------------------------------------------------------------- #
+class FactsStore(ABC):
+    """Somewhere to put one metadata document per catalog item (Firestore).
+
+    Peer of `BlobStore`: blob stores hold the derived bytes, facts stores hold
+    the structured metadata pointing at them. Per CLAUDE.md's write-ownership
+    rule, this is the agent's side of "intents in, facts out" — the agent is
+    the only writer here. Adapters live in `sync/facts.py`.
+    """
+    name: str = "facts"
+
+    @abstractmethod
+    def put(self, source: str, item_id: str, fact: dict) -> None:
+        """Write (overwrite) the metadata document for one item."""
+
+
+# --------------------------------------------------------------------------- #
 # The interface every connector implements
 # --------------------------------------------------------------------------- #
 class Connector(ABC):

@@ -1,22 +1,25 @@
 """
-Library-wide actions — the two that operate on a whole source rather than one file.
+Library-wide actions — the ones that operate on a whole source rather than one file.
 
     IndexAction        walk a source into the catalog. Resumable.
     DedupSourceAction  find identical copies within a source and archive the extras.
+    PublishAction      push a thumbnail + metadata fact for every un-published item.
 
-Both are Actions rather than loose functions so they inherit the same dry-run gate
-and the same journal entry as everything else. A dedup run triggered from the web
-module leaves exactly the record a dedup run typed at the terminal does.
+All three are Actions rather than loose functions so they inherit the same dry-run
+gate and the same journal entry as everything else. A publish run triggered from
+the web module leaves exactly the record a publish run typed at the terminal does.
 """
 from __future__ import annotations
 
 from typing import Optional
 
+from ..blobstore import blob_key
 from ..catalog import dedup as dedup_mod, scanner
 from ..catalog.store import Catalog
-from ..ports import Connector
+from ..ports import BlobStore, Connector, FactsStore
 from .base import Action, NoOp
 from .dedup import ArchiveDuplicatesAction
+from .derive import ThumbnailAction
 
 
 class IndexAction(Action):
@@ -142,3 +145,84 @@ class DedupSourceAction(Action):
             raise NoOp("no groups could be archived")
         return {"groups_archived": len(archived), "bytes_reclaimed": freed,
                 "failed": failed, "detail": archived}
+
+
+class PublishAction(Action):
+    """Push a thumbnail + metadata fact for every catalog item not yet published.
+
+    Composes `ThumbnailAction` once per item, same shape `DedupSourceAction` uses
+    for `ArchiveDuplicatesAction` — one item failing doesn't take the rest down.
+
+    An item is marked published in the catalog only after BOTH the thumbnail and
+    the fact land, so a crash mid-run just leaves that item unpublished for the
+    next pass to retry. Content-addressed blob keys make the thumbnail step
+    idempotent too — re-running finds it already there and moves straight to
+    writing the fact.
+    """
+    action_type = "publish"
+
+    def __init__(self, source: str, connector: Connector, catalog: Catalog,
+                 blobs: BlobStore, facts: FactsStore, *, max_items: Optional[int] = None):
+        self.source = source
+        self.connector = connector
+        self.catalog = catalog
+        self.blobs = blobs
+        self.facts = facts
+        self.max_items = max_items
+        self._pending = None
+
+    @property
+    def target_id(self) -> str:
+        return self.source
+
+    @property
+    def inputs(self) -> dict:
+        return {"source": self.source, "connector": self.connector.name,
+                "blobstore": self.blobs.name, "facts": self.facts.name,
+                "max_items": self.max_items}
+
+    def validate(self) -> tuple[bool, str]:
+        if self.catalog.count(self.source) == 0:
+            return False, f"nothing indexed for {self.source} — run an index first"
+        self._pending = self.catalog.unpublished(self.source, limit=self.max_items)
+        return True, ""
+
+    def describe(self) -> str:
+        n = len(self._pending or [])
+        if not n:
+            return f"nothing to publish in {self.source} — already up to date"
+        return (f"publish {n} item(s) from {self.source}: "
+                f"thumbnail -> {self.blobs.name}, metadata -> {self.facts.name}")
+
+    def _execute(self) -> dict:
+        if not self._pending:
+            raise NoOp(f"nothing to publish in {self.source}")
+
+        published, failed = [], []
+        for row in self._pending:
+            item_id = row["item_id"]
+            try:
+                thumb = ThumbnailAction(item_id, self.connector, self.blobs).run(commit=True)
+                if thumb.status == "failed":
+                    failed.append({"item_id": item_id, "error": thumb.error})
+                    continue
+                # A "no-op" thumbnail (already stored) has no outputs — the key is
+                # deterministic from the hash, so recompute it rather than skip.
+                key = thumb.outputs.get("key") or blob_key(row["quick_hash"], "thumbs", "webp")
+                self.facts.put(self.source, item_id, {
+                    "source": self.source, "item_id": item_id, "name": row["name"],
+                    "size": row["size"], "mtime": row["mtime"], "mime": row["mime"],
+                    "quick_hash": row["quick_hash"], "thumbnail_key": key,
+                    "thumbnail_url": self.blobs.url(key),
+                })
+                self.catalog.mark_published(self.source, item_id)
+                published.append(item_id)
+            except Exception as e:
+                failed.append({"item_id": item_id, "error": str(e)})
+
+        if published:
+            self.catalog.conn.commit()
+
+        if not published:
+            raise NoOp("no items could be published")
+        return {"published": len(published), "failed": failed}

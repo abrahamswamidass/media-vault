@@ -5,6 +5,8 @@ Media Vault agent CLI.
     mediavault index nas                       walk a source into the catalog
     mediavault dedup nas                       find duplicates (dry-run)
     mediavault dedup nas --commit              archive them
+    mediavault publish nas                     preview what needs a thumbnail
+    mediavault publish nas --commit            push thumbnails + metadata
     mediavault stats                           what the catalog knows
 
     mediavault nas list --root /data/nas       poke one connector operation
@@ -24,6 +26,7 @@ from typing import Optional
 from .catalog import Catalog, dedup as dedup_mod, scanner
 from .actions.dedup import ArchiveDuplicatesAction
 from .actions.log import ActionLog
+from .actions.maintenance import PublishAction
 from .connectors import CONNECTORS, build_connector
 from .ports import FileRecord, NotSupported, OpResult
 
@@ -57,6 +60,25 @@ def _banner(committed: bool):
 
 def _catalog(args) -> Catalog:
     return Catalog(args.db or os.getenv("CATALOG_DB", "/data/catalog/catalog.sqlite"))
+
+
+def _blobs_for(args):
+    """GCSBlobStore when GCS_LIVE=1, else a local folder — same live-switch the
+    connectors use, so `publish` is safe to run before any cloud is configured."""
+    if os.getenv("GCS_LIVE", "0") == "1":
+        from .blobstore import GCSBlobStore
+        return GCSBlobStore()
+    from .blobstore import LocalBlobStore
+    return LocalBlobStore(getattr(args, "blob_dir", None) or os.getenv("BLOB_CACHE", "/data/catalog/blobs"))
+
+
+def _facts_for(args):
+    """FirestoreFactsStore when GCS_LIVE=1, else a local folder of JSON files."""
+    if os.getenv("GCS_LIVE", "0") == "1":
+        from .sync.facts import FirestoreFactsStore
+        return FirestoreFactsStore()
+    from .sync.facts import LocalFactsStore
+    return LocalFactsStore(getattr(args, "facts_dir", None) or os.getenv("FACTS_CACHE", "/data/catalog/facts"))
 
 
 def _connector_for(source: str, args):
@@ -232,6 +254,41 @@ def cmd_dedup(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# publish
+# --------------------------------------------------------------------------- #
+def cmd_publish(args) -> int:
+    connector = _connector_for(args.source, args)
+    blobs = _blobs_for(args)
+    facts = _facts_for(args)
+
+    with _catalog(args) as catalog:
+        if catalog.count(args.source) == 0:
+            print(f"Nothing indexed for '{args.source}'. Run: mediavault index {args.source}")
+            return 1
+
+        log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+        result = log.record(
+            PublishAction(args.source, connector, catalog, blobs, facts,
+                          max_items=args.max_items).run(commit=args.commit))
+
+        if args.json:
+            _emit(result.to_dict(), True)
+            return 0 if result.status != "failed" else 1
+
+        print(result.detail)
+        if result.status == "ok" and result.committed:
+            _banner(True)
+            print(f"Published {result.outputs.get('published', 0)} item(s) "
+                  f"(thumbnails -> {blobs.name}, metadata -> {facts.name}).")
+            failed = result.outputs.get("failed") or []
+            if failed:
+                print(f"{len(failed)} item(s) failed — see the journal.")
+        elif not args.commit and result.status == "ok":
+            _banner(False)
+        return 0 if result.status != "failed" else 1
+
+
+# --------------------------------------------------------------------------- #
 # stats
 # --------------------------------------------------------------------------- #
 def cmd_stats(args) -> int:
@@ -247,6 +304,7 @@ def cmd_stats(args) -> int:
                 "source": source,
                 "indexed": catalog.count(source),
                 "archived": catalog.count(source, state="archived"),
+                "published": catalog.published_count(source),
                 "duplicate_groups": len(catalog.duplicate_groups(source)),
                 "reclaimable_bytes": catalog.wasted_bytes(source),
             })
@@ -255,10 +313,12 @@ def cmd_stats(args) -> int:
             _emit(rows, True)
             return 0
 
-        print(f"{'source':10} {'indexed':>10} {'archived':>10} {'dup groups':>12} {'reclaimable':>13}")
+        print(f"{'source':10} {'indexed':>10} {'archived':>10} {'published':>10} "
+              f"{'dup groups':>12} {'reclaimable':>13}")
         for r in rows:
             print(f"{r['source']:10} {r['indexed']:>10,} {r['archived']:>10,} "
-                  f"{r['duplicate_groups']:>12,} {_human(r['reclaimable_bytes']):>13}")
+                  f"{r['published']:>10,} {r['duplicate_groups']:>12,} "
+                  f"{_human(r['reclaimable_bytes']):>13}")
         return 0
 
 
@@ -368,6 +428,26 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ignore files smaller than this many bytes")
     dd.add_argument("--limit", type=int, default=20, help="groups to print")
     dd.set_defaults(_fn=cmd_dedup, permanent=False)
+
+    # -- publish --
+    pub = sub.add_parser(
+        "publish",
+        help="push a thumbnail + metadata fact for every catalog item not yet published",
+        description="Walks the catalog for items with no thumbnail/metadata pushed "
+                    "yet. Thumbnails go to GCSBlobStore (GCS_LIVE=1) or a local "
+                    "folder; metadata facts go to Firestore (GCS_LIVE=1) or a local "
+                    "folder of JSON files — same live-switch the connectors use.")
+    pub.add_argument("source", choices=CONNECTORS)
+    pub.add_argument("--root", help="override the connector root")
+    pub.add_argument("--trash", help="override the NAS trash folder")
+    pub.add_argument("--db", help="catalog database path")
+    pub.add_argument("--log-dir", help="where to write the action journal")
+    pub.add_argument("--blob-dir", help="local thumbnail folder (ignored if GCS_LIVE=1)")
+    pub.add_argument("--facts-dir", help="local facts folder (ignored if GCS_LIVE=1)")
+    pub.add_argument("--max-items", type=int, help="publish at most this many items")
+    pub.add_argument("--commit", action="store_true",
+                     help="ACTUALLY generate and push (default: preview only)")
+    pub.set_defaults(_fn=cmd_publish, permanent=False)
 
     # -- stats --
     s = sub.add_parser("stats", help="what the catalog currently knows")

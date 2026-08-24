@@ -1,0 +1,77 @@
+"""
+Facts adapters — where cataloged item metadata goes for the web module to read.
+
+Peer of `blobstore.py`: that file holds the derived *bytes* (thumbnails,
+previews), this one holds the *metadata* pointing at them (name, size, dates,
+which blob key to fetch). Same Ports & Adapters split, same reason it lives in
+`sync/` rather than `catalog/` — this is the agent's half of "intents in, facts
+out": the web module only ever reads what lands here, never writes it.
+
+`LocalFactsStore` makes the publish pipeline runnable and testable with no
+cloud account, exactly like `LocalBlobStore` does for thumbnails.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+
+from ..ports import FactsStore
+
+#: Firestore document IDs can't contain '/'. item_id is a path, so flatten it.
+_SLASH_RE = re.compile(r"[/\\]+")
+
+
+def doc_id(source: str, item_id: str) -> str:
+    """Deterministic Firestore-safe document id for one catalog item."""
+    return f"{source}__{_SLASH_RE.sub('_', item_id)}"
+
+
+class LocalFactsStore(FactsStore):
+    """Writes one JSON file per item. Used by tests and `--offline` runs."""
+    name = "local"
+
+    def __init__(self, root: str):
+        self.root = Path(root).expanduser().resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def put(self, source: str, item_id: str, fact: dict) -> None:
+        p = self.root / f"{doc_id(source, item_id)}.json"
+        p.write_text(json.dumps(fact, indent=2, default=str))
+
+
+class FirestoreFactsStore(FactsStore):
+    """The real target. Ships guarded, same pattern as GCSBlobStore/DriveConnector:
+    the shape is real, network calls stay behind an explicit env check so a
+    half-configured machine can't surprise you with a write.
+
+    Reuses GCS_LIVE — Firestore and Cloud Storage are both part of the one
+    "GCP mirror push" per requirements.txt, and share the same service-account
+    credentials via GOOGLE_APPLICATION_CREDENTIALS.
+
+    Writes to the `items` collection — per CLAUDE.md's write-ownership rule,
+    `items/` is agent-written, `intents/` is web-written.
+    """
+    name = "firestore"
+
+    def __init__(self, collection: str = "items"):
+        self.collection = collection
+        self.live = os.getenv("GCS_LIVE", "0") == "1"
+        self._client = None
+
+    def _require_live(self):
+        if not self.live:
+            raise NotImplementedError(
+                "Firestore is in SAFE mode (GCS_LIVE!=1). Use LocalFactsStore, "
+                "or set GCS_LIVE=1 once credentials are in place."
+            )
+        if self._client is None:
+            from google.cloud import firestore  # optional extra — only imported when GCS_LIVE=1
+
+            self._client = firestore.Client()
+        return self._client
+
+    def put(self, source: str, item_id: str, fact: dict) -> None:
+        client = self._require_live()
+        client.collection(self.collection).document(doc_id(source, item_id)).set(fact)

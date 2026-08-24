@@ -28,7 +28,7 @@ from typing import Callable, Optional
 from ..actions.base import Action, ActionResult
 from ..actions.derive import FetchFullResAction, ThumbnailAction
 from ..actions.file_ops import CopyAction, DeleteAction, MoveAction
-from ..actions.maintenance import DedupSourceAction, IndexAction
+from ..actions.maintenance import DedupSourceAction, IndexAction, PublishAction
 
 # --------------------------------------------------------------------------- #
 # States
@@ -126,6 +126,14 @@ REGISTRY: dict[str, tuple[Callable[[Intent, "AgentContext"], Action], str]] = {
         ),
         "archive identical copies WITHIN one source — never across sources",
     ),
+    "publish": (
+        lambda i, ctx: PublishAction(
+            i.item_id, ctx.connector(i.item_id), ctx.require_catalog(),
+            ctx.blobs, ctx.require_facts(),
+            max_items=i.params.get("max_items"),
+        ),
+        "push a thumbnail + metadata fact for every item not yet published",
+    ),
 }
 
 
@@ -139,6 +147,7 @@ class AgentContext:
     connectors: dict            # name -> Connector
     blobs: object               # BlobStore
     catalog: object = None      # Catalog, for the library-wide intents
+    facts: object = None        # FactsStore, for the "publish" intent
 
     def connector(self, name: str):
         if name not in self.connectors:
@@ -150,6 +159,12 @@ class AgentContext:
             raise UnknownIntent(
                 "this intent needs the catalog, but no catalog was configured")
         return self.catalog
+
+    def require_facts(self):
+        if self.facts is None:
+            raise UnknownIntent(
+                "this intent needs a facts store, but none was configured")
+        return self.facts
 
 
 # --------------------------------------------------------------------------- #

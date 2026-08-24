@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS items (
     full_hash   TEXT,
     state       TEXT NOT NULL DEFAULT 'active',
     indexed_at  TEXT NOT NULL,
+    published_at TEXT,
     PRIMARY KEY (source, item_id)
 );
 
@@ -70,7 +71,22 @@ class Catalog:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a catalog was first created.
+
+        `CREATE TABLE IF NOT EXISTS` in SCHEMA only shapes a brand-new database —
+        an existing one (like a NAS already indexed before `published_at` existed)
+        needs its own ALTER TABLE. SQLite has no "ADD COLUMN IF NOT EXISTS", so we
+        just swallow the "duplicate column" error on a re-run.
+        """
+        try:
+            self.conn.execute("ALTER TABLE items ADD COLUMN published_at TEXT")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):
+                raise
 
     def close(self) -> None:
         self.conn.close()
@@ -126,6 +142,14 @@ class Catalog:
             (source, item_id),
         )
 
+    def mark_published(self, source: str, item_id: str) -> None:
+        """Flag an item as published (thumbnail + facts pushed). Re-run-proof:
+        a later publish pass only looks at rows still missing this."""
+        self.conn.execute(
+            "UPDATE items SET published_at = ? WHERE source = ? AND item_id = ?",
+            (_now(), source, item_id),
+        )
+
     # --- reading ---------------------------------------------------------- #
     def get(self, source: str, item_id: str) -> Optional[sqlite3.Row]:
         return self.conn.execute(
@@ -140,9 +164,31 @@ class Catalog:
         return self.conn.execute(
             "SELECT COUNT(*) FROM items WHERE state = ?", (state,)).fetchone()[0]
 
+    def published_count(self, source: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "
+            "AND published_at IS NOT NULL", (source,)).fetchone()[0]
+
     def sources(self) -> list[str]:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT source FROM items ORDER BY source")]
+
+    def unpublished(self, source: str, limit: Optional[int] = None) -> list[sqlite3.Row]:
+        """Active, hashed items with no thumbnail/facts pushed yet, oldest-indexed first.
+
+        A hash is required — that's what a thumbnail is content-addressed by —
+        so an item still mid-scan (no quick_hash yet) is correctly skipped.
+        """
+        sql = (
+            "SELECT * FROM items WHERE source = ? AND state = 'active' "
+            "AND quick_hash IS NOT NULL AND published_at IS NULL "
+            "ORDER BY indexed_at, item_id"
+        )
+        params: tuple = (source,)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (source, limit)
+        return self.conn.execute(sql, params).fetchall()
 
     def duplicate_groups(self, source: str, min_size: int = 1) -> list[list[sqlite3.Row]]:
         """Active items in one source sharing a quick_hash, grouped.

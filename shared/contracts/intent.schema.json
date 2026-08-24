@@ -27,12 +27,13 @@
         "copy",
         "move",
         "index",
-        "dedup_source"
+        "dedup_source",
+        "publish"
       ]
     },
     "item_id": {
       "type": "string",
-      "description": "For per-file intents, the connector-native id (for the NAS, a path relative to the share root). For the library-wide intents 'index' and 'dedup_source', the source name itself."
+      "description": "For per-file intents, the connector-native id (for the NAS, a path relative to the share root). For the library-wide intents 'index', 'dedup_source', and 'publish', the source name itself."
     },
     "params": {
       "type": "object",
@@ -100,6 +101,14 @@
           ],
           "minimum": 1,
           "description": "dedup_source only. Cap how many duplicate groups one run archives."
+        },
+        "max_items": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "publish only. Cap how many un-published items one run pushes."
         }
       },
       "additionalProperties": false

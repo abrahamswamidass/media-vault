@@ -81,10 +81,24 @@ docker exec media-vault-container python -m mediavault.cli index nas
 docker exec media-vault-container python -m mediavault.cli stats
 docker exec media-vault-container python -m mediavault.cli dedup nas
 docker exec media-vault-container python -m mediavault.cli dedup nas --commit
+docker exec media-vault-container python -m mediavault.cli publish nas
+docker exec media-vault-container python -m mediavault.cli publish nas --commit
 ```
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
+
+### Publish (thumbnails + metadata)
+
+`publish` walks the catalog for items that haven't been pushed yet — for each
+one it generates a thumbnail and writes a metadata document, so the (not yet
+built) web module has something to browse. Content-addressed by hash, so a
+re-run only touches what's new; already-published items are skipped without a
+network call. Without `GCS_LIVE=1`, thumbnails land in a local folder
+(`--blob-dir`, default `/data/catalog/blobs`) and metadata in local JSON files
+(`--facts-dir`, default `/data/catalog/facts`) — safe to run before any cloud
+is configured, to see what it would do. With `GCS_LIVE=1`, both go to the real
+Cloud Storage bucket and Firestore (see "Cloud mirror" below).
 
 ### Deduplication
 
@@ -123,16 +137,18 @@ path directly.
 
 ## Cloud mirror (optional)
 
-`GCSBlobStore` is a real client (not a stub) — it's where thumbnails/previews
-will land once the bulk-thumbnail pass is built. Set it up now if you want to
-smoke-test uploads today.
+Both `GCSBlobStore` (thumbnails) and `FirestoreFactsStore` (metadata) are real
+clients, not stubs — one `GCS_LIVE=1` switch turns both on, since they use the
+same service-account credentials. This is what `publish` (see "Daily use"
+above) pushes to.
 
 1. **Cloud Storage → Create bucket.** Single region, Standard class.
 2. **Add a lifecycle rule: delete objects under `previews/` after 1 day.**
    This one is load-bearing — without it, full-res fetches accumulate forever.
-3. **IAM → Service Accounts → Create.** Grant *Storage Object Admin* and
+3. **Firestore → Create database**, Native mode, same project/region as the bucket.
+4. **IAM → Service Accounts → Create.** Grant *Storage Object Admin* and
    *Cloud Datastore User*.
-4. Download the key JSON into `C:\mediavault\secrets` (already mounted at
+5. Download the key JSON into `C:\mediavault\secrets` (already mounted at
    `/secrets` by the base `docker run` command in step 2), then add these env
    vars to that command:
 
@@ -142,9 +158,11 @@ smoke-test uploads today.
   -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/your-key.json `
 ```
 
-5. `doctor` confirms the bucket and key are found. To smoke-test an actual
-   upload (there's no bulk-thumbnail CLI command yet):
+6. `doctor` confirms the bucket and key are found. Then:
 
 ```powershell
-docker exec media-vault-container python -c "from mediavault.blobstore import GCSBlobStore; b = GCSBlobStore(); b.put('test/hello.txt', b'hello world'); print(b.exists('test/hello.txt')); print(b.url('test/hello.txt'))"
+docker exec media-vault-container python -m mediavault.cli publish nas --commit
 ```
+
+pushes real thumbnails to the bucket and metadata documents to Firestore's
+`items` collection.
