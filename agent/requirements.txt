@@ -25,4 +25,4 @@ smbprotocol>=1.12.0
 
 # --- GCP mirror push (Firestore metadata + Cloud Storage thumbnails) -------
 # google-cloud-firestore>=2.13.0
-# google-cloud-storage>=2.12.0
+google-cloud-storage>=2.12.0

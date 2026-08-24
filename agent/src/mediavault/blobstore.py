@@ -97,10 +97,12 @@ class GCSBlobStore(BlobStore):
                 "GCS is in SAFE mode (GCS_LIVE!=1). Use LocalBlobStore, or set "
                 "GCS_BUCKET + GCS_LIVE=1 once credentials are in place."
             )
+        if not self.bucket_name:
+            raise NotImplementedError("GCS_LIVE=1 but GCS_BUCKET is not set.")
         if self._bucket is None:
-            # from google.cloud import storage
-            # self._bucket = storage.Client().bucket(self.bucket_name)
-            raise NotImplementedError("GCS client not wired yet — implement _require_live().")
+            from google.cloud import storage  # optional extra — only imported when GCS_LIVE=1
+
+            self._bucket = storage.Client().bucket(self.bucket_name)
         return self._bucket
 
     def exists(self, key: str) -> bool:
