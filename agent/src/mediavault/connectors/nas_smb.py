@@ -95,7 +95,19 @@ class SMBNASConnector(Connector):
         item_id = (item_id or "").strip("/\\").replace("\\", "/")
         combined = posixpath.normpath(posixpath.join(self._root_rel, item_id)) if item_id else self._root_rel
         combined = "" if combined == "." else combined
-        if combined != self._root_rel and not combined.startswith(self._root_rel + "/"):
+        # An empty root_rel means the root IS the share, so every non-escaping
+        # path is "under" it — the old `combined.startswith(root_rel + "/")`
+        # check broke this case, since root_rel + "/" is just "/" and no
+        # relative path starts with a leading slash. Still explicitly block a
+        # ".." escape attempt, since normpath can't collapse one against an
+        # empty root the way it does against a real subfolder root.
+        escaping = combined == ".." or combined.startswith("../")
+        under_root = (
+            not escaping
+            and (not self._root_rel or combined == self._root_rel
+                 or combined.startswith(self._root_rel + "/"))
+        )
+        if not under_root:
             raise ValueError(f"Refusing to operate outside root: {combined}")
         rel_to_root = combined[len(self._root_rel):].lstrip("/") if self._root_rel else combined
         return self._to_unc(combined), rel_to_root
