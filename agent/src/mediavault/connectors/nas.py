@@ -36,12 +36,17 @@ class NASConnector(Connector):
     can_delete = True
     can_upload = True   # used for the Amazon staging-folder pattern too
 
-    def __init__(self, root: str, trash: str | None = None):
+    def __init__(self, root: str, trash: str | None = None, exclude: list[str] | None = None):
         self.root = Path(root).expanduser().resolve()
         # Default trash lives *inside* the root so it stays on the same volume (instant moves).
         self.trash = Path(trash).expanduser().resolve() if trash else self.root / "_trash"
         if not self.root.exists():
             raise FileNotFoundError(f"NAS root does not exist: {self.root}")
+        # Operational folders (trash, Amazon staging) never count as library
+        # content — matters once `root` is the whole share and they show up as
+        # ordinary subfolders. A path outside `root` just never matches, so it's
+        # harmless to always include it.
+        self._excluded = {self.trash} | {Path(p).expanduser().resolve() for p in (exclude or [])}
 
     # --- path safety ------------------------------------------------------ #
     def _resolve(self, item_id: str) -> Path:
@@ -56,8 +61,8 @@ class NASConnector(Connector):
         base = self._resolve(prefix) if prefix else self.root
         count = 0
         for entry in sorted(base.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
-            if entry.resolve() == self.trash:
-                continue  # never list the trash folder itself
+            if entry.resolve() in self._excluded:
+                continue  # never list trash / Amazon staging as library content
             st = entry.stat()
             yield FileRecord(
                 id=str(entry.relative_to(self.root)),

@@ -41,7 +41,8 @@ class SMBNASConnector(Connector):
     can_upload = True
 
     def __init__(self, host: str, share: str, root: str = "", trash: str | None = None,
-                 username: str | None = None, password: str | None = None):
+                 username: str | None = None, password: str | None = None,
+                 exclude: list[str] | None = None):
         import smbclient  # optional extra — only imported when NAS_MODE=smb
 
         self._smb = smbclient
@@ -57,6 +58,11 @@ class SMBNASConnector(Connector):
         self._trash_rel = self._strip_share_prefix(trash) if trash else posixpath.join(self._root_rel, "_trash")
         self.root = self._to_unc(self._root_rel)
         self.trash = self._to_unc(self._trash_rel)
+        # Operational folders (trash, Amazon staging) never count as library
+        # content — matters once NAS_SMB_ROOT is the whole share and they show
+        # up as ordinary subfolders. A path outside the scanned root just never
+        # matches, so it's harmless to always include it.
+        self._excluded_rel = {self._trash_rel} | {self._strip_share_prefix(p) for p in (exclude or [])}
 
         if username:
             smbclient.register_session(host, username=username, password=password)
@@ -101,9 +107,12 @@ class SMBNASConnector(Connector):
         names = sorted(self._smb.listdir(base_unc), key=str.lower)
         for name in names:
             entry_unc = f"{base_unc}\\{name}"
+            # Excluded paths are relative to the SHARE, not the scanned root (so
+            # a fixed trash/Amazon spot stays excluded no matter what NAS_SMB_ROOT
+            # points at) — compare on that basis, not on the root-relative `rel`.
+            if self._strip_share_prefix(entry_unc) in self._excluded_rel:
+                continue
             rel = f"{base_rel}/{name}" if base_rel else name
-            if rel == self._trash_rel:
-                continue  # never list the trash folder itself
             is_dir = self._smb.path.isdir(entry_unc)
             size = None if is_dir else self._smb.path.getsize(entry_unc)
             mtime = self._smb.path.getmtime(entry_unc)

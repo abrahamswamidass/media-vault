@@ -47,7 +47,10 @@ Notes:
   `\\192.168.6.110\homes\_trash` and `\\192.168.6.110\homes\_AmazonUpload` here.
   Omit `NAS_SMB_TRASH` to default to `<NAS_SMB_ROOT>/_trash` instead (nested,
   moves with the root); omit `AMAZON_SMB_ROOT` to default to `_AmazonUpload` at
-  the share's top level.
+  the share's top level. Both are automatically excluded from `index`/`dedup`/
+  `publish` — this matters once `NAS_SMB_ROOT` covers the whole share (see
+  below), where they'd otherwise show up as ordinary subfolders and get
+  cataloged like any other content.
 - **`NAS_PASSWORD`** — wrap in **single quotes** in PowerShell. Without quotes,
   a `$` in the password gets silently interpreted as a variable and the
   connection fails with `STATUS_LOGON_FAILURE`.
@@ -61,6 +64,14 @@ Notes:
 
 No volume mount or extra env var is needed for Amazon staging beyond
 `AMAZON_SMB_ROOT` above — it goes over the same SMB connection as the NAS.
+
+### Scanning the whole drive instead of one folder
+
+Set `NAS_SMB_ROOT=` (empty) to index the entire share from its root, once
+you're done testing against a subfolder. Nothing else changes — `NAS_SMB_TRASH`
+and `AMAZON_SMB_ROOT` are already share-relative and already excluded from
+`index`/`dedup`/`publish` (see the note above), so widening the scan doesn't
+pull trash or staged Amazon uploads into the library.
 
 ## 3. Check it
 

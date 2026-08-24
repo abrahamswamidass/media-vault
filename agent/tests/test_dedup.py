@@ -87,6 +87,27 @@ def test_unique_files_are_not_grouped(nas, catalog):
     assert find_duplicates(catalog, "nas", conn) == []
 
 
+def test_operational_folders_are_never_indexed(nas, catalog):
+    """Trash and Amazon staging must stay out of scope once root covers the
+    whole share — otherwise a full-drive scan would treat staged-for-Amazon
+    copies as duplicates of the originals and archive them out from under the
+    Amazon desktop app before it uploads them."""
+    _write(nas, "Photos/img.jpg", BIG, mtime=1_000_000)
+    _write(nas, "_trash/old_img.jpg", BIG, mtime=500_000)
+    _write(nas, "_AmazonUpload/2026-01/img.jpg", BIG, mtime=500_000)
+
+    conn = NASConnector(str(nas), exclude=[str(nas / "_AmazonUpload")])
+    scan(conn, catalog, source="nas")
+
+    ids = {row["item_id"] for row in catalog.conn.execute(
+        "SELECT item_id FROM items WHERE source = 'nas'")}
+    assert ids == {"Photos/img.jpg"}
+
+    # And dedup never sees the staged copy as a "duplicate" to archive.
+    groups = find_duplicates(catalog, "nas", conn)
+    assert groups == []
+
+
 # --------------------------------------------------------------------------- #
 # The safety invariants
 # --------------------------------------------------------------------------- #

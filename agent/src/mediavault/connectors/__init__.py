@@ -49,11 +49,19 @@ def build_connector(name: str, args):
                 trash=args.trash or os.getenv("NAS_SMB_TRASH"),
                 username=os.getenv("NAS_USER"),
                 password=_smb_password(),
+                # Amazon staging is a share-relative operational folder too — if
+                # NAS_SMB_ROOT ever covers the whole share, it must never show up
+                # as regular library content (index/dedup/publish would treat
+                # staged-but-not-yet-uploaded files as duplicates to archive).
+                exclude=[os.getenv("AMAZON_SMB_ROOT")] if os.getenv("AMAZON_SMB_ROOT") else None,
             )
         root = args.root or os.getenv("NAS_ROOT")
         if not root:
             raise SystemExit("nas needs --root <path> (or set NAS_ROOT)")
-        return NASConnector(root, trash=args.trash or os.getenv("NAS_TRASH"))
+        return NASConnector(
+            root, trash=args.trash or os.getenv("NAS_TRASH"),
+            exclude=[os.getenv("AMAZON_STAGING")] if os.getenv("AMAZON_STAGING") else None,
+        )
 
     if name == "drive":
         return DriveConnector(
