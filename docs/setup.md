@@ -250,6 +250,14 @@ account.
 
 ### 5. Fill in the config
 
+> The Firebase console's "Add app" screen offers to auto-generate this whole
+> file for you (it even calls it `firebase-config.js`) — **don't use that
+> snippet as-is.** It uses bare `import "firebase/app"` specifiers meant for
+> an npm/bundler project, which a plain browser can't resolve, and it calls
+> `initializeApp()` itself instead of exporting the config for `app.js` to
+> use. Take just the `apiKey`/`authDomain`/`projectId` values out of it and
+> paste them into the shape below instead.
+
 Edit `web/firebase-config.js` in the repo:
 
 ```js

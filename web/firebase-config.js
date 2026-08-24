@@ -1,12 +1,17 @@
-// Fill these in from your Firebase project settings (Project settings ->
-// General -> Your apps -> Web app -> SDK setup and configuration).
+// From Firebase console: Project settings -> General -> Your apps -> Web app.
 // None of this is secret — Firebase API keys are safe to commit; access is
 // controlled by Firestore/Storage security rules, not by hiding this key.
 // https://firebase.google.com/docs/projects/api-keys
+//
+// NOTE: app.js loads the Firebase SDK from a CDN URL and imports this file
+// as a plain ES module — it expects firebaseConfig exported as data, not
+// initializeApp() called here. Pasting the console's auto-generated snippet
+// as-is breaks this (it uses bare "firebase/app" specifiers meant for an
+// npm/bundler project, which a browser can't resolve directly).
 export const firebaseConfig = {
-  apiKey: "PASTE_ME",
-  authDomain: "PASTE_ME",
-  projectId: "PASTE_ME",
+  apiKey: "AIzaSyCKwqoofRG3TxT1L9z2a-p7QJYqEczlb00",
+  authDomain: "gcp-arch-340414.firebaseapp.com",
+  projectId: "gcp-arch-340414",
 };
 
 // The name you gave your Firestore database when you created it (NOT the
@@ -15,7 +20,8 @@ export const FIRESTORE_DATABASE = "media-vault-store";
 
 // The GCS bucket the agent's GCS_BUCKET env var points at — where thumbnails
 // actually live. Linked into Firebase Storage (see docs/setup.md) so
-// Storage security rules gate access to it.
+// Storage security rules gate access to it. Deliberately NOT
+// gcp-arch-340414.firebasestorage.app (that's the POC's default bucket).
 export const GCS_BUCKET = "mymediavault";
 
 // The only Google account allowed to sign in. Client-side check here is only
