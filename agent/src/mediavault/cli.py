@@ -8,6 +8,7 @@ Media Vault agent CLI.
     mediavault publish nas                     preview what needs a thumbnail
     mediavault publish nas --commit            push thumbnails + metadata
     mediavault stats                           what the catalog knows
+    mediavault reset nas --commit              wipe local catalog data for a source (testing)
 
     mediavault nas list --root /data/nas       poke one connector operation
     mediavault nas delete <path> --commit
@@ -323,6 +324,43 @@ def cmd_stats(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# reset
+# --------------------------------------------------------------------------- #
+def cmd_reset(args) -> int:
+    if not args.all and not args.source:
+        raise SystemExit("reset needs a source (e.g. 'nas'), or --all")
+
+    target = "the entire catalog" if args.all else f"'{args.source}'"
+    with _catalog(args) as catalog:
+        where = "" if args.all else "WHERE source = ?"
+        params = () if args.all else (args.source,)
+        n = catalog.conn.execute(f"SELECT COUNT(*) FROM items {where}", params).fetchone()[0]
+
+        if not args.commit:
+            if args.json:
+                _emit({"target": target, "item_rows": n, "committed": False}, True)
+            else:
+                print(f"DRY-RUN (no change): would delete {n:,} item row(s) and reset "
+                      f"scan checkpoints for {target}. Re-run with --commit to apply.")
+            return 0
+
+        result = catalog.reset(None if args.all else args.source)
+
+        if args.json:
+            _emit({**result, "target": target, "committed": True}, True)
+            return 0
+
+        _banner(True)
+        print(f"Reset {target}: deleted {result['items_deleted']:,} item row(s), "
+              f"{result['scans_deleted']:,} scan checkpoint(s).")
+        print("This only clears the local catalog — nothing on the NAS or in "
+              "GCS/Firestore changed. Thumbnails/facts already pushed are "
+              "content-addressed, so re-publishing after a re-index is a "
+              "no-op, not a re-upload.")
+        return 0
+
+
+# --------------------------------------------------------------------------- #
 # connector passthrough
 # --------------------------------------------------------------------------- #
 def cmd_connector(args) -> int:
@@ -453,6 +491,22 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("stats", help="what the catalog currently knows")
     s.add_argument("--db", help="catalog database path")
     s.set_defaults(_fn=cmd_stats)
+
+    # -- reset --
+    rs = sub.add_parser(
+        "reset",
+        help="wipe local catalog data for testing (never touches the NAS or cloud)",
+        description="Deletes catalog rows and scan checkpoints so the next index "
+                    "starts fresh. Thumbnails/facts already pushed to GCS/Firestore "
+                    "are left alone — content-addressed, so republishing after a "
+                    "re-index costs nothing extra.")
+    rs.add_argument("source", nargs="?", choices=CONNECTORS,
+                    help="source to reset (omit with --all)")
+    rs.add_argument("--all", action="store_true", help="reset every source")
+    rs.add_argument("--db", help="catalog database path")
+    rs.add_argument("--commit", action="store_true",
+                    help="ACTUALLY delete (default: preview only)")
+    rs.set_defaults(_fn=cmd_reset)
 
     # -- connectors --
     for name in CONNECTORS:

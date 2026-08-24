@@ -150,6 +150,24 @@ class Catalog:
             (_now(), source, item_id),
         )
 
+    def reset(self, source: str | None = None) -> dict:
+        """Wipe catalog rows for one source, or everything if source is None.
+
+        Testing/dev convenience — a re-index rebuilds this from scratch, so it's
+        always safe to throw away. Never touches the NAS or any cloud store:
+        thumbnails/facts already published stay right where they are, and are
+        content-addressed, so re-publishing after a re-index is a no-op rather
+        than a re-upload.
+        """
+        with self.transaction() as c:
+            if source:
+                items = c.execute("DELETE FROM items WHERE source = ?", (source,)).rowcount
+                scans = c.execute("DELETE FROM scans WHERE source = ?", (source,)).rowcount
+            else:
+                items = c.execute("DELETE FROM items").rowcount
+                scans = c.execute("DELETE FROM scans").rowcount
+        return {"items_deleted": items, "scans_deleted": scans}
+
     # --- reading ---------------------------------------------------------- #
     def get(self, source: str, item_id: str) -> Optional[sqlite3.Row]:
         return self.conn.execute(

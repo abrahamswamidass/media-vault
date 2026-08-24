@@ -109,6 +109,36 @@ def test_operational_folders_are_never_indexed(nas, catalog):
 
 
 # --------------------------------------------------------------------------- #
+# Catalog reset (testing convenience)
+# --------------------------------------------------------------------------- #
+def test_reset_wipes_one_source_only(nas, tmp_path, catalog):
+    _write(nas, "Photos/img.jpg", BIG)
+    drive_root = tmp_path / "drive"
+    _write(drive_root, "img.jpg", BIG)
+    scan(NASConnector(str(nas)), catalog, source="nas")
+    scan(NASConnector(str(drive_root)), catalog, source="drive")
+
+    result = catalog.reset("nas")
+
+    assert result == {"items_deleted": 1, "scans_deleted": 1}
+    assert catalog.count("nas", state="active") == 0
+    assert catalog.count("drive", state="active") == 1  # untouched
+
+
+def test_reset_all_wipes_every_source(nas, tmp_path, catalog):
+    _write(nas, "Photos/img.jpg", BIG)
+    drive_root = tmp_path / "drive"
+    _write(drive_root, "img.jpg", BIG)
+    scan(NASConnector(str(nas)), catalog, source="nas")
+    scan(NASConnector(str(drive_root)), catalog, source="drive")
+
+    result = catalog.reset(None)
+
+    assert result == {"items_deleted": 2, "scans_deleted": 2}
+    assert catalog.sources() == []
+
+
+# --------------------------------------------------------------------------- #
 # The safety invariants
 # --------------------------------------------------------------------------- #
 def test_sources_are_never_compared(nas, tmp_path, catalog):

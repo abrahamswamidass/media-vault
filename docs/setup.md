@@ -99,6 +99,23 @@ docker exec media-vault-container python -m mediavault.cli publish nas --commit
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
 
+### Starting over (testing)
+
+While testing against a small folder, you'll often want to wipe the local
+catalog and re-index from scratch rather than accumulate test data:
+
+```powershell
+docker exec media-vault-container python -m mediavault.cli reset nas          # preview
+docker exec media-vault-container python -m mediavault.cli reset nas --commit # actually wipe
+docker exec media-vault-container python -m mediavault.cli reset --all --commit  # every source
+```
+
+This only clears the local SQLite catalog (item rows + scan checkpoints) — it
+never touches the NAS or anything already pushed to GCS/Firestore. Since
+thumbnails are content-addressed by file hash, re-publishing after a reset +
+re-index finds the old blob still there and skips straight to writing the
+fact — no wasted re-upload.
+
 ### Publish (thumbnails + metadata)
 
 `publish` walks the catalog for items that haven't been pushed yet — for each
