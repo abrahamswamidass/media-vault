@@ -164,6 +164,12 @@ def run_checks() -> list[Check]:
             fix="Google Cloud Console -> IAM -> Service Accounts -> create one with "
                 "Storage Object Admin + Cloud Datastore User. Download the JSON key "
                 "to secrets/ and point GOOGLE_APPLICATION_CREDENTIALS at it."))
+        checks.append(Check(
+            "Cloud mirror", "firestore database", OK,
+            env("FIRESTORE_DATABASE") or "(default)",
+            "Only matters if you named your Firestore database something other "
+            "than \"(default)\" when creating it — set FIRESTORE_DATABASE to "
+            "match, or the client looks for \"(default)\" and gets NOT_FOUND."))
     else:
         checks.append(Check(
             "Cloud mirror", "live mode", WARN,

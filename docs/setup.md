@@ -173,9 +173,14 @@ above) pushes to.
 1. **Cloud Storage → Create bucket.** Single region, Standard class.
 2. **Add a lifecycle rule: delete objects under `previews/` after 1 day.**
    This one is load-bearing — without it, full-res fetches accumulate forever.
-3. **Firestore → Create database**, Native mode, same project/region as the bucket.
+3. **Firestore → Create database**, Native mode, same project/region as the
+   bucket. If you name it anything other than the default (e.g.
+   `media-vault-store`), you must set `FIRESTORE_DATABASE` to match below —
+   the client looks for a database literally named `(default)` otherwise and
+   fails with `NOT_FOUND`.
 4. **IAM → Service Accounts → Create.** Grant *Storage Object Admin* and
-   *Cloud Datastore User*.
+   *Cloud Datastore User* — the latter covers Firestore Native mode too, it's
+   built on the same underlying API.
 5. Download the key JSON into `C:\mediavault\secrets` (already mounted at
    `/secrets` by the base `docker run` command in step 2), then add these env
    vars to that command:
@@ -183,10 +188,13 @@ above) pushes to.
 ```powershell
   -e GCS_LIVE=1 `
   -e GCS_BUCKET=your-bucket-name `
+  -e FIRESTORE_DATABASE=your-database-name `
   -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/your-key.json `
 ```
 
-6. `doctor` confirms the bucket and key are found. Then:
+(omit `FIRESTORE_DATABASE` if you kept the default database name)
+
+6. `doctor` confirms the bucket, key, and Firestore database name are all set. Then:
 
 ```powershell
 docker exec media-vault-container python -m mediavault.cli publish nas --commit

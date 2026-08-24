@@ -55,8 +55,13 @@ class FirestoreFactsStore(FactsStore):
     """
     name = "firestore"
 
-    def __init__(self, collection: str = "items"):
+    def __init__(self, collection: str = "items", database: str | None = None):
         self.collection = collection
+        # A GCP project can hold multiple named Firestore databases; "(default)"
+        # only exists if one was created under that exact name. Anything else —
+        # e.g. a database named "media-vault-store" — must be passed explicitly,
+        # or the client looks for "(default)" and gets NOT_FOUND.
+        self.database = database or os.getenv("FIRESTORE_DATABASE") or "(default)"
         self.live = os.getenv("GCS_LIVE", "0") == "1"
         self._client = None
 
@@ -69,7 +74,7 @@ class FirestoreFactsStore(FactsStore):
         if self._client is None:
             from google.cloud import firestore  # optional extra — only imported when GCS_LIVE=1
 
-            self._client = firestore.Client()
+            self._client = firestore.Client(database=self.database)
         return self._client
 
     def put(self, source: str, item_id: str, fact: dict) -> None:
