@@ -331,6 +331,8 @@ def cmd_reset(args) -> int:
         raise SystemExit("reset needs a source (e.g. 'nas'), or --all")
 
     target = "the entire catalog" if args.all else f"'{args.source}'"
+    source = None if args.all else args.source
+
     with _catalog(args) as catalog:
         where = "" if args.all else "WHERE source = ?"
         params = () if args.all else (args.source,)
@@ -338,25 +340,38 @@ def cmd_reset(args) -> int:
 
         if not args.commit:
             if args.json:
-                _emit({"target": target, "item_rows": n, "committed": False}, True)
+                _emit({"target": target, "item_rows": n, "purge_facts": args.purge_facts,
+                      "committed": False}, True)
             else:
                 print(f"DRY-RUN (no change): would delete {n:,} item row(s) and reset "
-                      f"scan checkpoints for {target}. Re-run with --commit to apply.")
+                      f"scan checkpoints for {target}.")
+                if args.purge_facts:
+                    print("Would also delete every published fact (Firestore/local) "
+                          f"for {target}.")
+                print("Re-run with --commit to apply.")
             return 0
 
-        result = catalog.reset(None if args.all else args.source)
+        result = catalog.reset(source)
+
+        facts_deleted = None
+        if args.purge_facts:
+            facts_deleted = _facts_for(args).purge(source)
 
         if args.json:
-            _emit({**result, "target": target, "committed": True}, True)
+            out = {**result, "target": target, "committed": True}
+            if facts_deleted is not None:
+                out["facts_deleted"] = facts_deleted
+            _emit(out, True)
             return 0
 
         _banner(True)
         print(f"Reset {target}: deleted {result['items_deleted']:,} item row(s), "
               f"{result['scans_deleted']:,} scan checkpoint(s).")
-        print("This only clears the local catalog — nothing on the NAS or in "
-              "GCS/Firestore changed. Thumbnails/facts already pushed are "
-              "content-addressed, so re-publishing after a re-index is a "
-              "no-op, not a re-upload.")
+        if facts_deleted is not None:
+            print(f"Also purged {facts_deleted:,} published fact(s) for {target}.")
+        print("Nothing on the NAS or in GCS changed — thumbnails already pushed are "
+              "content-addressed, so re-publishing after a re-index finds them and "
+              "skips straight to (re)writing the fact.")
         return 0
 
 
@@ -495,15 +510,22 @@ def build_parser() -> argparse.ArgumentParser:
     # -- reset --
     rs = sub.add_parser(
         "reset",
-        help="wipe local catalog data for testing (never touches the NAS or cloud)",
+        help="wipe local catalog data for testing (never touches the NAS or GCS)",
         description="Deletes catalog rows and scan checkpoints so the next index "
-                    "starts fresh. Thumbnails/facts already pushed to GCS/Firestore "
-                    "are left alone — content-addressed, so republishing after a "
-                    "re-index costs nothing extra.")
+                    "starts fresh. Thumbnails in GCS are left alone regardless — "
+                    "content-addressed, so republishing after a re-index costs "
+                    "nothing extra. Published Firestore/local facts are left alone "
+                    "too unless --purge-facts is given; pass it when the scan root "
+                    "changed (e.g. a subfolder -> the whole share), since that "
+                    "changes item_id and leaves the old facts stale rather than "
+                    "overwritten.")
     rs.add_argument("source", nargs="?", choices=CONNECTORS,
                     help="source to reset (omit with --all)")
     rs.add_argument("--all", action="store_true", help="reset every source")
     rs.add_argument("--db", help="catalog database path")
+    rs.add_argument("--purge-facts", action="store_true",
+                    help="also delete every published fact (Firestore/local) for this source")
+    rs.add_argument("--facts-dir", help="local facts folder override (ignored if GCS_LIVE=1)")
     rs.add_argument("--commit", action="store_true",
                     help="ACTUALLY delete (default: preview only)")
     rs.set_defaults(_fn=cmd_reset)

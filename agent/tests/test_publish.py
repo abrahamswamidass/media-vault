@@ -125,3 +125,26 @@ def test_missing_source_index_fails_validation(tmp_path, catalog, blobs, facts):
     result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
     assert result.status == STATUS_FAILED
     assert "run an index first" in result.error
+
+
+def test_purge_facts_deletes_only_the_given_source(nas, catalog, blobs, facts, tmp_path):
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    facts.put("drive", "unrelated.jpg", {"source": "drive", "item_id": "unrelated.jpg"})
+
+    deleted = facts.purge("nas")
+
+    assert deleted == 1
+    assert not list(facts.root.glob("nas__*.json"))
+    assert list(facts.root.glob("drive__*.json"))  # untouched
+
+
+def test_purge_facts_all_sources(nas, catalog, blobs, facts):
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    facts.put("drive", "unrelated.jpg", {"source": "drive", "item_id": "unrelated.jpg"})
+
+    deleted = facts.purge(None)
+
+    assert deleted == 2
+    assert list(facts.root.glob("*.json")) == []

@@ -93,6 +93,17 @@ class FactsStore(ABC):
     def put(self, source: str, item_id: str, fact: dict) -> None:
         """Write (overwrite) the metadata document for one item."""
 
+    @abstractmethod
+    def purge(self, source: str | None = None) -> int:
+        """Delete every fact for a source (or everything if source is None).
+
+        Testing/dev convenience — mirrors Catalog.reset(). Needed because facts
+        are keyed by item_id (a path), so re-indexing under a different scan
+        root (e.g. a subfolder -> the whole share) produces new keys for the
+        same files, leaving the old documents stale rather than overwritten.
+        Returns the number of documents deleted.
+        """
+
 
 # --------------------------------------------------------------------------- #
 # The interface every connector implements

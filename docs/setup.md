@@ -116,6 +116,20 @@ thumbnails are content-addressed by file hash, re-publishing after a reset +
 re-index finds the old blob still there and skips straight to writing the
 fact — no wasted re-upload.
 
+**If you're widening the scan root** (e.g. a subfolder → the whole share),
+add `--purge-facts` too. Facts are keyed by `item_id`, which is a path
+relative to whatever root you scanned — widening the root changes that path
+for the same files, so old facts don't get overwritten, they go stale
+alongside new ones:
+
+```powershell
+docker exec media-vault-container python -m mediavault.cli reset nas --purge-facts --commit
+```
+
+This deletes matching Firestore documents (or local JSON files) too. GCS
+thumbnails are still left alone — no reason to touch them, they're
+content-addressed and re-publishing reuses them regardless of path.
+
 ### Publish (thumbnails + metadata)
 
 `publish` walks the catalog for items that haven't been pushed yet — for each

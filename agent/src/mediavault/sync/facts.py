@@ -40,6 +40,15 @@ class LocalFactsStore(FactsStore):
         p = self.root / f"{doc_id(source, item_id)}.json"
         p.write_text(json.dumps(fact, indent=2, default=str))
 
+    def purge(self, source: str | None = None) -> int:
+        prefix = f"{source}__" if source else ""
+        deleted = 0
+        for p in self.root.glob("*.json"):
+            if not source or p.name.startswith(prefix):
+                p.unlink()
+                deleted += 1
+        return deleted
+
 
 class FirestoreFactsStore(FactsStore):
     """The real target. Ships guarded, same pattern as GCSBlobStore/DriveConnector:
@@ -80,3 +89,13 @@ class FirestoreFactsStore(FactsStore):
     def put(self, source: str, item_id: str, fact: dict) -> None:
         client = self._require_live()
         client.collection(self.collection).document(doc_id(source, item_id)).set(fact)
+
+    def purge(self, source: str | None = None) -> int:
+        client = self._require_live()
+        coll = client.collection(self.collection)
+        docs = coll.where("source", "==", source).stream() if source else coll.stream()
+        deleted = 0
+        for doc in docs:
+            doc.reference.delete()
+            deleted += 1
+        return deleted
