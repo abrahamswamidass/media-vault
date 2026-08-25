@@ -12,10 +12,15 @@
     <p id="status">Loading…</p>
     <button id="signout-btn" hidden>Sign out</button>
   </header>
+  <nav id="nav" hidden>
+    <a href="#browse" data-view="browse">Browse</a>
+    <a href="#duplicates" data-view="duplicates">Duplicates</a>
+    <a href="#amazon" data-view="amazon">Amazon</a>
+  </nav>
   <div id="signin" hidden>
     <button id="signin-btn">Sign in with Google</button>
   </div>
-  <main id="grid" class="grid" hidden></main>
+  <main id="view" hidden></main>
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -49,6 +49,122 @@ button:hover {
   text-align: center;
 }
 
+nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #333;
+}
+
+nav a {
+  color: #999;
+  text-decoration: none;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+}
+
+nav a:hover {
+  color: #eee;
+}
+
+nav a.active {
+  color: #eee;
+  border-bottom-color: #eee;
+}
+
+.view-status {
+  color: #999;
+  font-size: 0.9rem;
+}
+
+.month-group {
+  margin-bottom: 2rem;
+}
+
+.month-group h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #ccc;
+  margin: 0 0 0.75rem;
+}
+
+.load-more {
+  display: block;
+  margin: 1rem auto;
+}
+
+.stub {
+  max-width: 32rem;
+  padding: 2rem 0;
+}
+
+.stub h2 {
+  margin-top: 0;
+}
+
+.stub p {
+  color: #aaa;
+  line-height: 1.5;
+}
+
+.stub code {
+  background: #1c1c1c;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.modal-content {
+  position: relative;
+  background: #1c1c1c;
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 32rem;
+  width: 100%;
+}
+
+.modal-content img {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.modal-title {
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+  word-break: break-all;
+}
+
+.modal-meta {
+  color: #999;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.modal-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.modal-fullres:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .card.broken {
   opacity: 0.4;
 }
@@ -63,6 +179,7 @@ button:hover {
   background: #1c1c1c;
   border-radius: 8px;
   overflow: hidden;
+  cursor: pointer;
 }
 
 .card img {

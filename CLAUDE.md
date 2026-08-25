@@ -30,10 +30,14 @@ agent/           Module 1 — local Python. The only thing that touches files.
     doctor.py      preflight config check
     cli.py
   tests/
-web/             Module 2 — Firebase Hosting. Currently a minimal static
-                 read-only viewer (index.html/app.js/style.css, no build
-                 step) — a placeholder MVP, not the eventual React app.
-                 Single-user Google sign-in; access is gated server-side by
+web/             Module 2 — Firebase Hosting. Currently a minimal static app
+                 (no build step) — a placeholder MVP, not the eventual React
+                 app. app.js is a sign-in gate + hash router; each tab is a
+                 view module (views/browse.js, duplicates.js, amazon.js)
+                 exporting mount()/unmount(). Browse is functional
+                 (chronological grid, paginated); the other two are stubs —
+                 see their file comments for what's blocking each. Single-
+                 user Google sign-in; access is gated server-side by
                  firestore.rules/storage.rules (owner email hardcoded there),
                  not by hiding the URL. See docs/setup.md's "Web viewer".
 shared/contracts/ JSON Schema both modules validate against. Change here first.

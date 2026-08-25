@@ -1,31 +1,26 @@
-// Single-user viewer: sign in with Google, then read the agent's `items`
-// Firestore collection and render thumbnails via Firebase Storage. Access is
-// enforced server-side by firestore.rules / storage.rules — this file's
-// OWNER_EMAIL check is only for picking which screen to show, not security.
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+// App shell: sign-in gate + hash-based router between views. No framework —
+// each view module exports mount(container)/unmount(container); the router
+// just swaps which one owns #view.
 import {
-  getFirestore, collection, query, orderBy, limit, getDocs,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+  GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import {
-  getStorage, ref, getDownloadURL,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
-import { firebaseConfig, FIRESTORE_DATABASE, GCS_BUCKET, OWNER_EMAIL } from "./firebase-config.js";
+import { auth } from "./firebase.js";
+import { OWNER_EMAIL } from "./firebase-config.js";
+import * as browseView from "./views/browse.js";
+import * as duplicatesView from "./views/duplicates.js";
+import * as amazonView from "./views/amazon.js";
 
-const PAGE_SIZE = 300;
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app, FIRESTORE_DATABASE);
-const storage = getStorage(app, `gs://${GCS_BUCKET}`);
+const VIEWS = { browse: browseView, duplicates: duplicatesView, amazon: amazonView };
+const DEFAULT_VIEW = "browse";
 
 const statusEl = document.getElementById("status");
-const gridEl = document.getElementById("grid");
+const navEl = document.getElementById("nav");
+const viewEl = document.getElementById("view");
 const signinEl = document.getElementById("signin");
 const signinBtn = document.getElementById("signin-btn");
 const signoutBtn = document.getElementById("signout-btn");
+
+let currentView = null;
 
 signinBtn.addEventListener("click", () => {
   signInWithPopup(auth, new GoogleAuthProvider()).catch((err) => {
@@ -34,47 +29,31 @@ signinBtn.addEventListener("click", () => {
 });
 signoutBtn.addEventListener("click", () => signOut(auth));
 
-async function renderItems(items) {
-  gridEl.innerHTML = "";
-  for (const item of items) {
-    const card = document.createElement("div");
-    card.className = "card";
+function viewNameFromHash() {
+  const name = location.hash.replace("#", "");
+  return VIEWS[name] ? name : DEFAULT_VIEW;
+}
 
-    const img = document.createElement("img");
-    img.alt = item.name || item.item_id;
-    img.loading = "lazy";
-    card.appendChild(img);
+function route() {
+  const name = viewNameFromHash();
+  if (name === currentView) return;
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = item.item_id;
-    meta.title = item.item_id;
-    card.appendChild(meta);
-
-    gridEl.appendChild(card);
-
-    // Fetched after the card is in the DOM so a slow/broken URL for one item
-    // never blocks the rest of the grid from rendering.
-    getDownloadURL(ref(storage, item.thumbnail_key))
-      .then((url) => { img.src = url; })
-      .catch((err) => { card.classList.add("broken"); console.error(item.item_id, err); });
+  if (currentView) VIEWS[currentView].unmount(viewEl);
+  currentView = name;
+  for (const link of navEl.querySelectorAll("a")) {
+    link.classList.toggle("active", link.dataset.view === name);
   }
+  VIEWS[name].mount(viewEl);
 }
 
-async function loadGallery() {
-  statusEl.textContent = "Loading…";
-  const q = query(collection(db, "items"), orderBy("mtime", "desc"), limit(PAGE_SIZE));
-  const snap = await getDocs(q);
-  const items = snap.docs.map((d) => d.data());
-  statusEl.textContent = `${items.length} item(s)`;
-  renderItems(items);
-}
+window.addEventListener("hashchange", route);
 
 onAuthStateChanged(auth, (user) => {
   const signedIn = !!user && user.email === OWNER_EMAIL;
 
   signinEl.hidden = signedIn;
-  gridEl.hidden = !signedIn;
+  navEl.hidden = !signedIn;
+  viewEl.hidden = !signedIn;
   signoutBtn.hidden = !signedIn;
 
   if (!user) {
@@ -86,8 +65,7 @@ onAuthStateChanged(auth, (user) => {
     signOut(auth);
     return;
   }
-  loadGallery().catch((err) => {
-    statusEl.textContent = `Failed to load: ${err.message}`;
-    console.error(err);
-  });
+  statusEl.textContent = "";
+  if (!location.hash) location.hash = `#${DEFAULT_VIEW}`;
+  route();
 });
