@@ -148,17 +148,17 @@ def cmd_index(args) -> int:
 
         def progress(p):
             if not args.quiet:
-                # A leading newline moves past --debug's in-place file line,
-                # which never printed one of its own so it can overwrite itself.
-                prefix = "\n" if args.debug else ""
-                print(f"{prefix}  {p.directory or '/':50} {p.files_indexed:>6} files")
+                print(f"  {p.directory or '/':50} {p.files_indexed:>6} files")
 
         def file_progress(item_id, i, total):
-            # \r + no newline: overwrites in place rather than spamming one
-            # line per file, but still gives you a live "what's it doing right
-            # now" view — the exact thing missing when a big directory
-            # (hundreds/thousands of files) looks like it might be stuck.
-            print(f"\r    {i}/{total} {item_id[:70]:<70}", end="", flush=True)
+            # A plain line per file, not an in-place \r overwrite — some
+            # terminal front-ends (observed: Docker Desktop's built-in exec
+            # panel) only render a line once a real newline arrives, so a
+            # carriage-return-only update can sit invisible indefinitely even
+            # while genuinely making progress. A bit more scroll noise, but
+            # it's guaranteed visible everywhere, which is the actual point
+            # of --debug.
+            print(f"    {i}/{total} {item_id}", flush=True)
 
         report = scanner.scan(connector, catalog, source=args.source,
                               resume=not args.restart, on_progress=progress,
