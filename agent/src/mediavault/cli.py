@@ -13,6 +13,8 @@ Media Vault agent CLI.
     mediavault nas list --root /data/nas       poke one connector operation
     mediavault nas delete <path> --commit
 
+    mediavault amazon-stage <item-id> --commit stage a NAS item for Amazon (no local file needed)
+
 SAFETY: everything that mutates is dry-run by default. Add --commit to apply.
 NAS deletes are soft — the file moves to the trash folder and stays recoverable.
 """
@@ -25,6 +27,7 @@ import sys
 from typing import Optional
 
 from .catalog import Catalog, dedup as dedup_mod, scanner
+from .actions.amazon import StageForAmazonAction
 from .actions.dedup import ArchiveDuplicatesAction
 from .actions.log import ActionLog
 from .actions.maintenance import PublishAction
@@ -376,6 +379,30 @@ def cmd_reset(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# amazon-stage
+# --------------------------------------------------------------------------- #
+def cmd_amazon_stage(args) -> int:
+    empty_args = argparse.Namespace(root=None, trash=None, permanent=False)
+    source = build_connector(args.source, empty_args)
+    amazon = build_connector("amazon", empty_args)
+
+    log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+    result = log.record(
+        StageForAmazonAction(args.item_id, source, amazon).run(commit=args.commit))
+
+    if args.json:
+        _emit(result.to_dict(), True)
+        return 0 if result.status != "failed" else 1
+
+    print(result.detail)
+    if result.committed:
+        _banner(True)
+    elif result.status == "ok":
+        _banner(False)
+    return 0 if result.status != "failed" else 1
+
+
+# --------------------------------------------------------------------------- #
 # connector passthrough
 # --------------------------------------------------------------------------- #
 def cmd_connector(args) -> int:
@@ -529,6 +556,21 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--commit", action="store_true",
                     help="ACTUALLY delete (default: preview only)")
     rs.set_defaults(_fn=cmd_reset)
+
+    # -- amazon-stage --
+    st = sub.add_parser(
+        "amazon-stage",
+        help="stage an item from another connector (e.g. NAS) for Amazon — no local file needed",
+        description="Reads the item straight from --source (default: nas) and stages "
+                    "it into Amazon's dated album folder, same as 'mediavault amazon "
+                    "upload' but without needing the file on the container's own "
+                    "filesystem first.")
+    st.add_argument("item_id", help="source connector item id (path)")
+    st.add_argument("--source", choices=CONNECTORS, default="nas")
+    st.add_argument("--log-dir", help="where to write the action journal")
+    st.add_argument("--commit", action="store_true",
+                    help="ACTUALLY stage it (default: preview only)")
+    st.set_defaults(_fn=cmd_amazon_stage)
 
     # -- connectors --
     for name in CONNECTORS:

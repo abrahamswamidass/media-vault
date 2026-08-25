@@ -163,17 +163,23 @@ identical. Archived copies move to trash — the NAS trash folder, or Drive's
 
 ### Amazon
 
+Two ways to stage a file — pick whichever matches where it already is.
+
+**From the NAS directly** (the common case — no local file needed):
+```powershell
+docker exec media-vault-container python -m mediavault.cli amazon-stage "Photos/2026-01/img_001.jpg" --source nas --commit
+```
+Reads the item straight off the NAS connector and stages it, preserving the
+original filename under a dated album folder (`AMAZON_SMB_ROOT/YYYY-MM/`).
+
+**From a file already on the container's own filesystem** (e.g. something
+you separately mounted in):
 ```powershell
 docker exec media-vault-container python -m mediavault.cli amazon upload /path/to/local/img_001.jpg --commit
 ```
 
-Stages the file into the watched folder (`AMAZON_SMB_ROOT`, dated by month).
-Amazon's desktop app picks it up and it appears on your Fire TV. No Amazon API
-or credentials involved. The source path here must be reachable *inside the
-container's own filesystem* — not a NAS path, since `upload` copies a local
-file onto the share. If the file you want to stage only exists on the NAS,
-mount it in (`-v` a local copy, or a small folder) rather than passing an SMB
-path directly.
+Either way, Amazon's desktop app picks up the staged file and it appears on
+your Fire TV. No Amazon API or credentials involved.
 
 ---
 

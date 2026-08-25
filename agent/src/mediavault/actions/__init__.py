@@ -4,6 +4,7 @@ from .file_ops import CopyAction, DeleteAction, MoveAction
 from .derive import FetchFullResAction, ThumbnailAction
 from .dedup import ArchiveDuplicatesAction
 from .maintenance import DedupSourceAction, IndexAction, PublishAction
+from .amazon import StageForAmazonAction
 from .log import ActionLog
 
 __all__ = [
@@ -12,5 +13,6 @@ __all__ = [
     "CopyAction", "DeleteAction", "MoveAction",
     "FetchFullResAction", "ThumbnailAction",
     "ArchiveDuplicatesAction", "DedupSourceAction", "IndexAction", "PublishAction",
+    "StageForAmazonAction",
     "ActionLog",
 ]

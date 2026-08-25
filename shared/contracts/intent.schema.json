@@ -28,7 +28,8 @@
         "move",
         "index",
         "dedup_source",
-        "publish"
+        "publish",
+        "stage_for_amazon"
       ]
     },
     "item_id": {

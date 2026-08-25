@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
+from ..actions.amazon import StageForAmazonAction
 from ..actions.base import Action, ActionResult
 from ..actions.derive import FetchFullResAction, ThumbnailAction
 from ..actions.file_ops import CopyAction, DeleteAction, MoveAction
@@ -133,6 +134,12 @@ REGISTRY: dict[str, tuple[Callable[[Intent, "AgentContext"], Action], str]] = {
             max_items=i.params.get("max_items"),
         ),
         "push a thumbnail + metadata fact for every item not yet published",
+    ),
+    "stage_for_amazon": (
+        lambda i, ctx: StageForAmazonAction(
+            i.item_id, ctx.connector(i.params.get("source", "nas")), ctx.connector("amazon"),
+        ),
+        "copy an item into Amazon's dated staging folder, no local file needed",
     ),
 }
 
