@@ -200,6 +200,15 @@ def run_checks() -> list[Check]:
         checks.append(Check(
             "Tooling", "Pillow", WARN, "not installed",
             "Needed only for thumbnails and previews: pip install Pillow"))
+    try:
+        import exiftool  # noqa: F401
+        checks.append(Check("Tooling", "PyExifTool", OK, "available"))
+    except ImportError:
+        checks.append(Check(
+            "Tooling", "PyExifTool", WARN, "not installed",
+            "Needed only for EXIF (date taken, camera, dimensions) during "
+            "publish: pip install PyExifTool. Publishing still works without "
+            "it — those fields just stay empty."))
 
     return checks
 

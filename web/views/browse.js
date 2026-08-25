@@ -1,10 +1,17 @@
 // Browse view: chronological grid, grouped by year/month, paginated.
 //
-// Grouping uses `mtime` (filesystem modified time, already on every fact)
-// rather than a true "date taken" — that needs EXIF extraction on the agent
-// side (tracked separately) and isn't wired in yet. Fine as an approximation
-// for now; swapping the sort/group key to a real date_taken field later is a
-// one-line change once that lands.
+// Sorting/pagination is by `mtime` — every fact has it, and Firestore's
+// orderBy silently excludes documents missing the ordered field, so ordering
+// by date_taken would drop anything without EXIF (screenshots, older items
+// published before EXIF extraction existed) from the list entirely.
+//
+// Grouping/display prefers `date_taken` (real EXIF capture date) per item
+// when present, falling back to `mtime` otherwise — the more accurate field
+// without risking dropped items. One accepted tradeoff: since the sort key
+// (mtime) and group key (date_taken) can diverge slightly — e.g. a file
+// copied weeks after it was taken — a group can rarely appear slightly out
+// of strict order. Cosmetic only; not worth the complexity of reordering
+// sections to fully eliminate.
 import {
   collection, query, orderBy, limit, startAfter, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -24,8 +31,12 @@ let exhausted = false;
 let loading = false;
 const groupEls = new Map(); // "2026-08" -> <section> element, so pages merge into existing months
 
-function groupKey(mtimeSeconds) {
-  const d = new Date(mtimeSeconds * 1000);
+function effectiveDate(item) {
+  return item.date_taken ?? item.mtime;
+}
+
+function groupKey(dateSeconds) {
+  const d = new Date(dateSeconds * 1000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
@@ -83,8 +94,12 @@ function renderCard(item) {
 function openModal(item, thumbUrl) {
   modal.querySelector("img").src = thumbUrl || "";
   modal.querySelector(".modal-title").textContent = item.item_id;
+  const camera = [item.camera_make, item.camera_model].filter(Boolean).join(" ");
+  const dims = item.width && item.height ? `${item.width}×${item.height} · ` : "";
   modal.querySelector(".modal-meta").textContent =
-    `${(item.size / 1024).toFixed(0)} KB · ${new Date(item.mtime * 1000).toLocaleString()}`;
+    `${dims}${(item.size / 1024).toFixed(0)} KB · `
+    + `${new Date(effectiveDate(item) * 1000).toLocaleString()}`
+    + (camera ? ` · ${camera}` : "");
   modal.hidden = false;
 }
 
@@ -105,7 +120,7 @@ async function loadPage() {
     lastDoc = snap.docs[snap.docs.length - 1];
     for (const doc of snap.docs) {
       const item = doc.data();
-      groupSection(groupKey(item.mtime)).querySelector(".grid").appendChild(renderCard(item));
+      groupSection(groupKey(effectiveDate(item))).querySelector(".grid").appendChild(renderCard(item));
     }
     if (snap.docs.length < PAGE_SIZE) {
       exhausted = true;

@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS items (
     state       TEXT NOT NULL DEFAULT 'active',
     indexed_at  TEXT NOT NULL,
     published_at TEXT,
+    width       INTEGER,
+    height      INTEGER,
+    date_taken  REAL,
+    camera_make TEXT,
+    camera_model TEXT,
     PRIMARY KEY (source, item_id)
 );
 
@@ -82,11 +87,19 @@ class Catalog:
         needs its own ALTER TABLE. SQLite has no "ADD COLUMN IF NOT EXISTS", so we
         just swallow the "duplicate column" error on a re-run.
         """
-        try:
-            self.conn.execute("ALTER TABLE items ADD COLUMN published_at TEXT")
-        except sqlite3.OperationalError as e:
-            if "duplicate column" not in str(e):
-                raise
+        for ddl in (
+            "ALTER TABLE items ADD COLUMN published_at TEXT",
+            "ALTER TABLE items ADD COLUMN width INTEGER",
+            "ALTER TABLE items ADD COLUMN height INTEGER",
+            "ALTER TABLE items ADD COLUMN date_taken REAL",
+            "ALTER TABLE items ADD COLUMN camera_make TEXT",
+            "ALTER TABLE items ADD COLUMN camera_model TEXT",
+        ):
+            try:
+                self.conn.execute(ddl)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
 
     def close(self) -> None:
         self.conn.close()
@@ -148,6 +161,19 @@ class Catalog:
         self.conn.execute(
             "UPDATE items SET published_at = ? WHERE source = ? AND item_id = ?",
             (_now(), source, item_id),
+        )
+
+    def set_exif(self, source: str, item_id: str, exif: dict) -> None:
+        """Record EXIF fields pulled from the file (see metadata.py). Missing
+        fields (most photos have partial or no EXIF) just store NULL."""
+        self.conn.execute(
+            """
+            UPDATE items SET width = ?, height = ?, date_taken = ?,
+                             camera_make = ?, camera_model = ?
+            WHERE source = ? AND item_id = ?
+            """,
+            (exif.get("width"), exif.get("height"), exif.get("date_taken"),
+             exif.get("camera_make"), exif.get("camera_model"), source, item_id),
         )
 
     def reset(self, source: str | None = None) -> dict:

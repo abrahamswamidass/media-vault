@@ -6,12 +6,15 @@ GCS/Firestore, exactly like LocalBlobStore already stands in for GCS elsewhere.
 from __future__ import annotations
 
 import io
+import sys
+import types
 
 import pytest
 
 PIL = pytest.importorskip("PIL", reason="thumbnailing needs Pillow (imaging extra)")
 from PIL import Image  # noqa: E402
 
+from mediavault import metadata
 from mediavault.actions import STATUS_FAILED, STATUS_NOOP, STATUS_OK
 from mediavault.actions.maintenance import PublishAction
 from mediavault.blobstore import LocalBlobStore, blob_key
@@ -82,6 +85,55 @@ def test_commit_pushes_thumbnail_and_fact(nas, catalog, blobs, facts):
     fact_file = facts.root / "nas__Photos_real.jpg.json"
     assert fact_file.exists()
     assert row["quick_hash"] in fact_file.read_text()
+
+
+@pytest.fixture
+def fake_exiftool(monkeypatch):
+    """Same fake-module injection as test_metadata.py — no real exiftool
+    binary needed to verify PublishAction wires the result through."""
+    state = {"result": []}
+
+    class FakeExifToolHelper:
+        def get_tags(self, files, tags):
+            return state["result"]
+
+    monkeypatch.setitem(sys.modules, "exiftool",
+                        types.SimpleNamespace(ExifToolHelper=FakeExifToolHelper))
+    monkeypatch.setattr(metadata, "_helper", None)
+    return state
+
+
+def test_commit_extracts_and_stores_exif(nas, catalog, blobs, facts, fake_exiftool):
+    fake_exiftool["result"] = [{
+        "File:ImageWidth": 800, "File:ImageHeight": 600,
+        "EXIF:DateTimeOriginal": "2026:01:15 10:30:00",
+        "EXIF:Make": "Canon", "EXIF:Model": "EOS R5",
+    }]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["width"] == 800
+    assert row["camera_model"] == "EOS R5"
+    assert row["date_taken"] is not None
+
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert "EOS R5" in fact_file.read_text()
+
+
+def test_missing_exif_tool_does_not_block_publish(nas, catalog, blobs, facts, monkeypatch):
+    """PyExifTool not being installed must degrade gracefully, not fail the item."""
+    monkeypatch.setitem(sys.modules, "exiftool", None)
+    monkeypatch.setattr(metadata, "_helper", None)
+    conn = _indexed(nas, catalog)
+
+    result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["width"] is None
 
 
 def test_rerun_is_a_noop(nas, catalog, blobs, facts):

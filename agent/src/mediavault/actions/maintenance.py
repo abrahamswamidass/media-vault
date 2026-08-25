@@ -11,8 +11,10 @@ the web module leaves exactly the record a publish run typed at the terminal doe
 """
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Optional
 
+from .. import metadata
 from ..blobstore import blob_key
 from ..catalog import dedup as dedup_mod, scanner
 from ..catalog.store import Catalog
@@ -20,6 +22,11 @@ from ..ports import BlobStore, Connector, FactsStore
 from .base import Action, NoOp
 from .dedup import ArchiveDuplicatesAction
 from .derive import ThumbnailAction
+
+#: EXIF lives near the start of a file — a small HEAD read is enough (same
+#: "never read a whole file" philosophy as quick_hash), and far cheaper than
+#: the full read ThumbnailAction needs for actual pixel decoding.
+_EXIF_HEAD_BYTES = 1_048_576
 
 
 class IndexAction(Action):
@@ -209,11 +216,30 @@ class PublishAction(Action):
                 # A "no-op" thumbnail (already stored) has no outputs — the key is
                 # deterministic from the hash, so recompute it rather than skip.
                 key = thumb.outputs.get("key") or blob_key(row["quick_hash"], "thumbs", "webp")
+
+                # EXIF is a bonus, not a requirement — most exports/screenshots
+                # have none, and PyExifTool/exiftool might not even be
+                # installed in every deployment. Any failure here just means
+                # this item's EXIF fields stay NULL, never blocks publishing.
+                exif = {}
+                try:
+                    suffix = PurePosixPath(item_id).suffix
+                    head = self.connector.read(item_id, nbytes=_EXIF_HEAD_BYTES)
+                    exif = metadata.extract(head, suffix=suffix)
+                except Exception:
+                    exif = {}
+                if exif:
+                    self.catalog.set_exif(self.source, item_id, exif)
+
                 self.facts.put(self.source, item_id, {
                     "source": self.source, "item_id": item_id, "name": row["name"],
                     "size": row["size"], "mtime": row["mtime"], "mime": row["mime"],
                     "quick_hash": row["quick_hash"], "thumbnail_key": key,
                     "thumbnail_url": self.blobs.url(key),
+                    "width": exif.get("width"), "height": exif.get("height"),
+                    "date_taken": exif.get("date_taken"),
+                    "camera_make": exif.get("camera_make"),
+                    "camera_model": exif.get("camera_model"),
                 })
                 self.catalog.mark_published(self.source, item_id)
                 published.append(item_id)

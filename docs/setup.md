@@ -142,6 +142,13 @@ network call. Without `GCS_LIVE=1`, thumbnails land in a local folder
 is configured, to see what it would do. With `GCS_LIVE=1`, both go to the real
 Cloud Storage bucket and Firestore (see "Cloud mirror" below).
 
+Each item also gets EXIF pulled from a small header read (dimensions, camera
+make/model, real capture date) via the `exiftool`/PyExifTool already baked
+into the image — no extra setup needed. It's best-effort: files with no EXIF
+(screenshots, some exports) or a missing PyExifTool install just leave those
+fields empty rather than failing the item. `doctor` reports whether PyExifTool
+is available under "Tooling".
+
 ### Deduplication
 
 Duplicates are found **within one source only**. The same photo on the NAS and
