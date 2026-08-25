@@ -148,10 +148,21 @@ def cmd_index(args) -> int:
 
         def progress(p):
             if not args.quiet:
-                print(f"  {p.directory or '/':50} {p.files_indexed:>6} files")
+                # A leading newline moves past --debug's in-place file line,
+                # which never printed one of its own so it can overwrite itself.
+                prefix = "\n" if args.debug else ""
+                print(f"{prefix}  {p.directory or '/':50} {p.files_indexed:>6} files")
+
+        def file_progress(item_id, i, total):
+            # \r + no newline: overwrites in place rather than spamming one
+            # line per file, but still gives you a live "what's it doing right
+            # now" view — the exact thing missing when a big directory
+            # (hundreds/thousands of files) looks like it might be stuck.
+            print(f"\r    {i}/{total} {item_id[:70]:<70}", end="", flush=True)
 
         report = scanner.scan(connector, catalog, source=args.source,
-                              resume=not args.restart, on_progress=progress)
+                              resume=not args.restart, on_progress=progress,
+                              on_file=file_progress if args.debug else None)
 
         if args.json:
             _emit(report.__dict__, True)
@@ -485,6 +496,10 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--restart", action="store_true",
                    help="ignore any checkpoint and scan from the beginning")
     i.add_argument("--quiet", action="store_true", help="suppress per-directory progress")
+    i.add_argument("--debug", action="store_true",
+                   help="show live per-file progress within each directory "
+                        "(what it's stat-ing right now) — useful for telling "
+                        "a big directory apart from a genuinely stuck scan")
     i.set_defaults(_fn=cmd_index, permanent=False)
 
     # -- dedup --

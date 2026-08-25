@@ -71,8 +71,16 @@ def scan(
     source: Optional[str] = None,
     resume: bool = True,
     on_progress: Optional[Callable[[ScanProgress], None]] = None,
+    on_file: Optional[Callable[[str, int, int], None]] = None,
 ) -> ScanReport:
-    """Index every file a connector can see. Resumable, checkpointed per directory."""
+    """Index every file a connector can see. Resumable, checkpointed per directory.
+
+    on_file(item_id, seen, total_in_directory), if given, fires right before
+    each file's stat() call — a live "what's it doing right now" hook. Useful
+    because on_progress only fires once a whole directory finishes, which for
+    a directory with hundreds/thousands of files can be many minutes with no
+    signal at all of whether the scan is working or stuck (see GitHub #11).
+    """
     source = source or connector.name
     cursor = catalog.begin_scan(source, resume=resume)
     resumed_from = cursor
@@ -103,10 +111,11 @@ def scan(
                 error_samples.append(f"{directory}: {e}")
             continue
 
-        for record in listing:
-            if record.is_dir:
-                continue
+        file_records = [r for r in listing if not r.is_dir]
+        for record in file_records:
             seen += 1
+            if on_file:
+                on_file(record.id, seen, len(file_records))
             try:
                 # list() carries no hash; stat() does the head/tail read.
                 full = connector.stat(record.id)

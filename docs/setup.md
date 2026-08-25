@@ -99,6 +99,15 @@ docker exec media-vault-container python -m mediavault.cli publish nas --commit
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
 
+**A large directory (hundreds/thousands of files — Google Photos exports are
+notorious for this) can take minutes with zero visible output**, since
+progress only prints once a whole directory finishes. Add `--debug` to see
+what it's actually doing right now, file by file:
+```powershell
+docker exec media-vault-container python -m mediavault.cli index nas --debug
+```
+Without this, a big directory and a genuinely stuck scan look identical.
+
 ### Starting over (testing)
 
 While testing against a small folder, you'll often want to wipe the local
