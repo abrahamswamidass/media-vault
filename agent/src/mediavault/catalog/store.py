@@ -72,9 +72,15 @@ class Catalog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.path))
         self.conn.row_factory = sqlite3.Row
-        # WAL keeps reads working while a long scan writes.
+        # WAL keeps reads working while a long scan writes. SQLite's own
+        # default busy_timeout is 0 — a second writer (e.g. `publish`
+        # running in another terminal while `index` is still going) fails
+        # immediately with "database is locked" instead of briefly waiting
+        # its turn, which is what actually happens under normal SQLite
+        # concurrency. 30s comfortably covers one commit's worth of wait.
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute("PRAGMA busy_timeout=30000")
         self.conn.executescript(SCHEMA)
         self._migrate()
         self.conn.commit()
