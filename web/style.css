@@ -119,10 +119,16 @@ nav a.active {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.8);
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+}
+
+/* [hidden] and .modal have equal specificity, and this stylesheet loads
+   after the browser's default one — without this rule, `display: flex`
+   below wins the tie and the modal shows regardless of the hidden attribute. */
+.modal:not([hidden]) {
+  display: flex;
 }
 
 .modal-content {
