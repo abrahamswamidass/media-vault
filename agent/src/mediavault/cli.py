@@ -202,6 +202,23 @@ def cmd_dedup(args) -> int:
             confirm=not args.no_confirm, min_size=args.min_size)
         summary = dedup_mod.summarize(groups)
 
+        if args.by_folder:
+            breakdown = dedup_mod.folder_breakdown(groups, depth=args.depth)
+            if args.json:
+                _emit({"summary": summary, "by_folder": breakdown}, True)
+                return 0
+            if not breakdown:
+                print(f"No archivable duplicates found in '{args.source}'.")
+                return 0
+            print(f"Reclaimable space by folder (depth {args.depth}) in '{args.source}':\n")
+            width = max(len(b["folder"]) for b in breakdown)
+            for b in breakdown:
+                print(f"  {b['folder']:<{width}}  {b['copies']:>5} copies  "
+                      f"{_human(b['reclaimable_bytes']):>10} reclaimable")
+            print(f"\n{summary['archivable_groups']} group(s), "
+                  f"{_human(summary['reclaimable_bytes'])} reclaimable total.")
+            return 0
+
         if args.json:
             _emit({
                 "summary": summary,
@@ -529,6 +546,11 @@ def build_parser() -> argparse.ArgumentParser:
     dd.add_argument("--min-size", type=int, default=1,
                     help="ignore files smaller than this many bytes")
     dd.add_argument("--limit", type=int, default=20, help="groups to print")
+    dd.add_argument("--by-folder", action="store_true",
+                    help="summarize reclaimable space by folder instead of "
+                         "listing every group — read-only, ignores --commit")
+    dd.add_argument("--depth", type=int, default=3,
+                    help="path segments per folder bucket with --by-folder (default: 3)")
     dd.set_defaults(_fn=cmd_dedup, permanent=False)
 
     # -- publish --

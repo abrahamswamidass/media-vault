@@ -193,6 +193,19 @@ archived, because sharing a size and both end-chunks is not proof of being
 identical. Archived copies move to trash — the NAS trash folder, or Drive's
 30-day trash — and stay recoverable.
 
+**On a large library, `dedup nas` listing every group one at a time isn't a
+useful way to sanity-check things before committing** — thousands of groups
+is too much to read. `--by-folder` summarizes reclaimable space by location
+instead:
+```powershell
+docker exec media-vault-container python -m mediavault.cli dedup nas --by-folder
+docker exec media-vault-container python -m mediavault.cli dedup nas --by-folder --depth 4
+```
+`--depth` controls how many path segments form each bucket (default 3, e.g.
+`winfredbe/Photos/2019`). Read-only — ignores `--commit` — so it's safe to run
+anytime just to see where the duplication actually is before archiving
+anything.
+
 ### Amazon
 
 Two ways to stage a file — pick whichever matches where it already is.

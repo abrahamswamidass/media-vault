@@ -188,3 +188,27 @@ def summarize(groups: list[DuplicateGroup]) -> dict:
         "unconfirmed_groups": len([g for g in groups if not g.confirmed]),
         "split_by_verification": sum(len(g._split) for g in groups),
     }
+
+
+def folder_breakdown(groups: list[DuplicateGroup], depth: int = 3) -> list[dict]:
+    """Where the reclaimable space actually sits, bucketed by the first
+    `depth` path segments of each redundant copy's location.
+
+    A large dedup run (thousands of groups) is unreadable one group at a
+    time — this answers the more useful question first: which folders
+    account for most of the duplication, before committing to archiving
+    any of it. Only counts archivable (confirmed, safe_to_archive) groups,
+    same as `summarize()`.
+    """
+    buckets: dict[str, dict] = {}
+    for g in groups:
+        if not g.safe_to_archive:
+            continue
+        for row in g.losers:
+            parts = row["item_id"].split("/")
+            folder = "/".join(parts[:depth]) if len(parts) > depth else "/".join(parts[:-1])
+            folder = folder or "/"
+            b = buckets.setdefault(folder, {"folder": folder, "copies": 0, "reclaimable_bytes": 0})
+            b["copies"] += 1
+            b["reclaimable_bytes"] += row["size"] or 0
+    return sorted(buckets.values(), key=lambda b: b["reclaimable_bytes"], reverse=True)

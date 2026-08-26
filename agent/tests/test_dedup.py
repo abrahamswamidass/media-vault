@@ -14,7 +14,7 @@ import pytest
 from mediavault.actions import STATUS_FAILED, STATUS_NOOP, STATUS_OK
 from mediavault.actions.dedup import ArchiveDuplicatesAction
 from mediavault.actions.maintenance import DedupSourceAction, IndexAction
-from mediavault.catalog import Catalog, find_duplicates, scan, summarize
+from mediavault.catalog import Catalog, find_duplicates, folder_breakdown, scan, summarize
 from mediavault.connectors.nas import NASConnector
 
 #: Bigger than the 128 KB the quick hash actually covers, so these files reach the
@@ -346,3 +346,35 @@ def test_wasted_bytes_counts_only_the_extras(nas, catalog):
 
     # Three copies of one file: two are redundant.
     assert catalog.wasted_bytes("nas") == 2 * len(BIG)
+
+
+# --------------------------------------------------------------------------- #
+# folder_breakdown — summarizing a large dedup run by location
+# --------------------------------------------------------------------------- #
+def test_folder_breakdown_buckets_by_path_depth(nas, catalog):
+    # Two redundant copies in 2019, one in 2020 — same total group structure
+    # (the 2019 batch keeps its oldest, the 2020 one keeps its only original).
+    _write(nas, "Photos/2019/a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "Photos/2019/a_copy.jpg", BIG, mtime=2_000_000)
+    _write(nas, "Photos/2019/a_copy2.jpg", BIG, mtime=3_000_000)
+    _write(nas, "Photos/2020/b.jpg", TAIL, mtime=1_000_000)
+    _write(nas, "Photos/2020/b_copy.jpg", TAIL, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    groups = find_duplicates(catalog, "nas", conn)
+    breakdown = folder_breakdown(groups, depth=2)
+
+    by_folder = {b["folder"]: b for b in breakdown}
+    assert by_folder["Photos/2019"]["copies"] == 2       # the two redundant 2019 copies
+    assert by_folder["Photos/2020"]["copies"] == 1       # the one redundant 2020 copy
+    # Sorted by reclaimable_bytes descending — 2019 has more redundant bytes.
+    assert breakdown[0]["folder"] == "Photos/2019"
+
+
+def test_folder_breakdown_only_counts_archivable_groups(nas, catalog):
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", b"unique content, no duplicate" * 100)
+    conn = _indexed(nas, catalog)
+
+    groups = find_duplicates(catalog, "nas", conn)
+    assert folder_breakdown(groups) == []
