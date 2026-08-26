@@ -117,6 +117,13 @@ completely different from the one named in "Resuming interrupted scan
 from: ...". `--debug` also prints `listing: <directory>` for each one as it's
 re-walked, so a stall shows you precisely which directory it's stuck on.
 
+**A dropped SMB session (idle timeout, brief network hiccup) no longer
+crashes the scan.** `index`/`publish`/`dedup` automatically reconnect and
+retry (a few attempts, a few seconds apart) before giving up. If you still
+see a crash instead of a brief pause, it's a persistent connectivity problem
+worth investigating on the NAS/network side, not something a re-run alone
+will fix.
+
 ### Starting over (testing)
 
 While testing against a small folder, you'll often want to wipe the local

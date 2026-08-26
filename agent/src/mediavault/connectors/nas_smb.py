@@ -18,9 +18,40 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+import time
 from typing import Iterable
 
 from ..ports import Connector, FileRecord, OpResult, NotSupported
+
+#: A dropped SMB session (idle timeout, network hiccup) used to crash the
+#: whole scan instead of costing a brief pause — see GitHub #11. Retried a
+#: bounded number of times, reconnecting in between, before giving up.
+_RETRY_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 3
+
+
+def _is_retryable_smb_error(exc: BaseException) -> bool:
+    import smbprotocol.exceptions as smb_exc  # lazy — only needed on this path
+
+    retryable = [
+        smb_exc.SMBConnectionClosed,
+        smb_exc.SMBAuthenticationError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+        TimeoutError,
+    ]
+    try:
+        # A dropped session sometimes surfaces as smbclient's own internal
+        # reconnect attempt losing track of credentials (observed:
+        # BadMechanismError, "no username or password was specified") rather
+        # than a clean SMBAuthenticationError — spnego is a smbprotocol
+        # dependency, so it's available whenever smbclient is.
+        import spnego.exceptions as spnego_exc
+        retryable.append(spnego_exc.SpnegoError)
+    except ImportError:
+        pass
+    return isinstance(exc, tuple(retryable))
 
 
 def _quick_fingerprint_smb(smbclient, unc_path: str, size: int, chunk: int = 65536) -> str:
@@ -63,6 +94,10 @@ class SMBNASConnector(Connector):
         # up as ordinary subfolders. A path outside the scanned root just never
         # matches, so it's harmless to always include it.
         self._excluded_rel = {self._trash_rel} | {self._strip_share_prefix(p) for p in (exclude or [])}
+        # Kept for _reconnect() — a dropped session needs to re-authenticate
+        # the same way, not just retry the failed call.
+        self._username = username
+        self._password = password
 
         if username:
             smbclient.register_session(host, username=username, password=password)
@@ -74,6 +109,33 @@ class SMBNASConnector(Connector):
             raise FileNotFoundError(
                 f"NAS SMB root does not exist or is unreachable: {self.root} ({exc})"
             ) from exc
+
+    # --- reconnect on a dropped session (#11) ------------------------------ #
+    def _reconnect(self) -> None:
+        try:
+            self._smb.reset_connection_cache()
+        except Exception:
+            pass  # best-effort — the register_session below is what matters
+        if self._username:
+            self._smb.register_session(self.host, username=self._username,
+                                       password=self._password)
+
+    def _retry(self, fn, *args, **kwargs):
+        """Run fn(*args, **kwargs), reconnecting and retrying if the SMB
+        session dropped mid-call. Idle timeouts and brief network hiccups are
+        expected over a multi-hour scan — this is the difference between that
+        costing a few seconds and crashing the whole run (#11)."""
+        last_exc: BaseException = None
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if not _is_retryable_smb_error(e) or attempt == _RETRY_ATTEMPTS - 1:
+                    raise
+                last_exc = e
+                time.sleep(_RETRY_DELAY_SECONDS)
+                self._reconnect()
+        raise last_exc  # pragma: no cover - loop always returns or raises above
 
     # --- path helpers ------------------------------------------------------ #
     def _strip_share_prefix(self, value: str) -> str:
@@ -116,7 +178,7 @@ class SMBNASConnector(Connector):
     def list(self, prefix: str = "", limit: int = 100) -> Iterable[FileRecord]:
         base_unc, base_rel = self._resolve(prefix) if prefix else (self.root, "")
         count = 0
-        names = sorted(self._smb.listdir(base_unc), key=str.lower)
+        names = self._retry(lambda: sorted(self._smb.listdir(base_unc), key=str.lower))
         for name in names:
             entry_unc = f"{base_unc}\\{name}"
             # Excluded paths are relative to the SHARE, not the scanned root (so
@@ -125,9 +187,7 @@ class SMBNASConnector(Connector):
             if self._strip_share_prefix(entry_unc) in self._excluded_rel:
                 continue
             rel = f"{base_rel}/{name}" if base_rel else name
-            is_dir = self._smb.path.isdir(entry_unc)
-            size = None if is_dir else self._smb.path.getsize(entry_unc)
-            mtime = self._smb.path.getmtime(entry_unc)
+            is_dir, size, mtime = self._retry(self._entry_meta, entry_unc)
             yield FileRecord(
                 id=rel, name=name, source=self.name, size=size, mtime=mtime,
                 mime=None, is_dir=is_dir,
@@ -136,8 +196,17 @@ class SMBNASConnector(Connector):
             if count >= limit:
                 break
 
+    def _entry_meta(self, entry_unc: str) -> tuple[bool, int | None, float]:
+        is_dir = self._smb.path.isdir(entry_unc)
+        size = None if is_dir else self._smb.path.getsize(entry_unc)
+        mtime = self._smb.path.getmtime(entry_unc)
+        return is_dir, size, mtime
+
     def stat(self, item_id: str) -> FileRecord:
         unc, rel = self._resolve(item_id)
+        return self._retry(self._stat_once, unc, rel)
+
+    def _stat_once(self, unc: str, rel: str) -> FileRecord:
         if not self._smb.path.exists(unc):
             raise FileNotFoundError(unc)
         is_dir = self._smb.path.isdir(unc)
@@ -151,6 +220,9 @@ class SMBNASConnector(Connector):
 
     def read(self, item_id: str, nbytes: int = 0) -> bytes:
         unc, _ = self._resolve(item_id)
+        return self._retry(self._read_once, unc, nbytes)
+
+    def _read_once(self, unc: str, nbytes: int) -> bytes:
         with self._smb.open_file(unc, mode="rb") as f:
             return f.read() if nbytes <= 0 else f.read(nbytes)
 
