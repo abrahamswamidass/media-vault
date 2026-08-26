@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import datetime, timezone
 
 import pytest
 
@@ -132,3 +133,78 @@ def test_retry_gives_up_after_max_attempts(fake_smbclient, monkeypatch):
 
     with pytest.raises(smb_exc.SMBConnectionClosed):
         conn._retry(always_drops)
+
+
+# --------------------------------------------------------------------------- #
+# scandir()-based metadata (no extra per-entry round trips) — #11
+# --------------------------------------------------------------------------- #
+def _fake_scandir_entry(name, is_dir, end_of_file=0, last_write_time=None):
+    info = types.SimpleNamespace(end_of_file=end_of_file, last_write_time=last_write_time)
+    return types.SimpleNamespace(name=name, is_dir=lambda: is_dir, smb_info=info)
+
+
+def test_entry_meta_from_scandir_file(fake_smbclient):
+    conn = _connector(fake_smbclient, root="")
+    # A naive datetime representing a UTC instant, per FILETIME's own
+    # definition (100ns intervals since 1601-01-01 UTC) — not local time.
+    naive_utc = datetime(2026, 1, 15, 10, 30, 0)
+    entry = _fake_scandir_entry("img.jpg", is_dir=False, end_of_file=12345,
+                                last_write_time=naive_utc)
+
+    is_dir, size, mtime = conn._entry_meta_from_scandir(entry)
+
+    assert is_dir is False
+    assert size == 12345
+    assert mtime == naive_utc.replace(tzinfo=timezone.utc).timestamp()
+
+
+def test_entry_meta_from_scandir_directory_has_no_size(fake_smbclient):
+    conn = _connector(fake_smbclient, root="")
+    entry = _fake_scandir_entry("Photos", is_dir=True, end_of_file=999,
+                                last_write_time=datetime(2026, 1, 1))
+
+    is_dir, size, _mtime = conn._entry_meta_from_scandir(entry)
+
+    assert is_dir is True
+    assert size is None
+
+
+class _FakeScandirContextManager:
+    def __init__(self, entries):
+        self._entries = entries
+
+    def __enter__(self):
+        return iter(self._entries)
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_list_gets_metadata_from_scandir_with_no_extra_calls(fake_smbclient):
+    """Regression: list() used to call isdir()/getsize()/getmtime() separately
+    per entry — up to 3 extra SMB round trips each, discarded immediately for
+    any entry that turned out to be a file during a directory-only walk. Over
+    a tree with thousands of files, that's what made the resume 'skip phase'
+    take 30+ minutes instead of seconds (#11)."""
+    conn = _connector(fake_smbclient, root="")
+    dt = datetime(2026, 6, 1, 12, 0, 0)
+    entries = [
+        _fake_scandir_entry("Photos", is_dir=True, end_of_file=0, last_write_time=dt),
+        _fake_scandir_entry("img.jpg", is_dir=False, end_of_file=500, last_write_time=dt),
+    ]
+    fake_smbclient.scandir = lambda path: _FakeScandirContextManager(entries)
+
+    def boom(*a, **k):
+        raise AssertionError("must not fall back to per-entry isdir/getsize/getmtime")
+
+    fake_smbclient.path.isdir = boom
+    fake_smbclient.path.getsize = boom
+    fake_smbclient.path.getmtime = boom
+
+    records = {r.name: r for r in conn.list()}
+
+    assert records["Photos"].is_dir is True
+    assert records["Photos"].size is None
+    assert records["img.jpg"].is_dir is False
+    assert records["img.jpg"].size == 500
+    assert records["img.jpg"].mtime == dt.replace(tzinfo=timezone.utc).timestamp()

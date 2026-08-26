@@ -124,6 +124,13 @@ see a crash instead of a brief pause, it's a persistent connectivity problem
 worth investigating on the NAS/network side, not something a re-run alone
 will fix.
 
+**The skip phase itself is also much faster now.** It used to fetch full
+metadata (type, size, modified time) for every file with 3 separate network
+calls each — wasted work for files, since the skip phase only needs to know
+which entries are directories. It now gets everything from the single
+directory-listing response instead, which is the difference between a
+directory-heavy resume taking 30+ minutes and taking seconds.
+
 ### Starting over (testing)
 
 While testing against a small folder, you'll often want to wipe the local

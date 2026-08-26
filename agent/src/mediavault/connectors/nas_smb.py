@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import posixpath
 import time
+from datetime import timezone
 from typing import Iterable
 
 from ..ports import Connector, FileRecord, OpResult, NotSupported
@@ -178,8 +179,9 @@ class SMBNASConnector(Connector):
     def list(self, prefix: str = "", limit: int = 100) -> Iterable[FileRecord]:
         base_unc, base_rel = self._resolve(prefix) if prefix else (self.root, "")
         count = 0
-        names = self._retry(lambda: sorted(self._smb.listdir(base_unc), key=str.lower))
-        for name in names:
+        entries = self._retry(self._scandir_once, base_unc)
+        for entry in entries:
+            name = entry.name
             entry_unc = f"{base_unc}\\{name}"
             # Excluded paths are relative to the SHARE, not the scanned root (so
             # a fixed trash/Amazon spot stays excluded no matter what NAS_SMB_ROOT
@@ -187,7 +189,7 @@ class SMBNASConnector(Connector):
             if self._strip_share_prefix(entry_unc) in self._excluded_rel:
                 continue
             rel = f"{base_rel}/{name}" if base_rel else name
-            is_dir, size, mtime = self._retry(self._entry_meta, entry_unc)
+            is_dir, size, mtime = self._entry_meta_from_scandir(entry)
             yield FileRecord(
                 id=rel, name=name, source=self.name, size=size, mtime=mtime,
                 mime=None, is_dir=is_dir,
@@ -196,10 +198,29 @@ class SMBNASConnector(Connector):
             if count >= limit:
                 break
 
-    def _entry_meta(self, entry_unc: str) -> tuple[bool, int | None, float]:
-        is_dir = self._smb.path.isdir(entry_unc)
-        size = None if is_dir else self._smb.path.getsize(entry_unc)
-        mtime = self._smb.path.getmtime(entry_unc)
+    def _scandir_once(self, base_unc: str) -> list:
+        # scandir()'s single FIND response already carries file-type and
+        # basic attributes for every entry — sorting the materialized list
+        # (rather than the raw iterator) lets the `with` block close the SMB
+        # directory handle before we start using the results.
+        with self._smb.scandir(base_unc) as it:
+            return sorted(it, key=lambda e: e.name.lower())
+
+    def _entry_meta_from_scandir(self, entry) -> tuple[bool, int | None, float]:
+        """is_dir/size/mtime straight from the scandir() FIND response — no
+        extra round trips. The previous version called isdir()/getsize()/
+        getmtime() separately per entry (up to 3 extra SMB calls each,
+        discarded immediately for any entry that turned out to be a file
+        during a directory-only walk); over a tree with thousands of files
+        that's what made the resume "skip phase" take 30+ minutes (#11)."""
+        is_dir = entry.is_dir()
+        info = entry.smb_info
+        size = None if is_dir else info.end_of_file
+        # last_write_time is a naive datetime that represents a UTC instant
+        # (FILETIME's own definition) — attach the tzinfo explicitly before
+        # calling timestamp(), which otherwise assumes local time and would
+        # silently produce a wrong epoch value shifted by the local UTC offset.
+        mtime = info.last_write_time.replace(tzinfo=timezone.utc).timestamp()
         return is_dir, size, mtime
 
     def stat(self, item_id: str) -> FileRecord:
