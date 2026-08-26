@@ -267,6 +267,8 @@ def cmd_dedup(args) -> int:
         actionable = [g for g in groups if g.safe_to_archive]
         if not actionable:
             return 0
+        if args.max_groups is not None:
+            actionable = actionable[:args.max_groups]
 
         log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
         archived = failed = 0
@@ -545,7 +547,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "unverified will be archived)")
     dd.add_argument("--min-size", type=int, default=1,
                     help="ignore files smaller than this many bytes")
-    dd.add_argument("--limit", type=int, default=20, help="groups to print")
+    dd.add_argument("--limit", type=int, default=20, help="groups to print in the preview")
+    dd.add_argument("--max-groups", type=int, default=None,
+                    help="ACTUALLY cap how many groups --commit archives in this run "
+                         "(distinct from --limit, which only trims the printed preview) "
+                         "— e.g. for archiving a large backlog in batches")
     dd.add_argument("--by-folder", action="store_true",
                     help="summarize reclaimable space by folder instead of "
                          "listing every group — read-only, ignores --commit")

@@ -190,8 +190,18 @@ copy — so that pair is never touched.
 Every group keeps exactly one copy: the **oldest**, tie-broken by the
 shallowest path. Files over 128 KB are fully hashed before anything is
 archived, because sharing a size and both end-chunks is not proof of being
-identical. Archived copies move to trash — the NAS trash folder, or Drive's
-30-day trash — and stay recoverable.
+identical. Archived copies **move** (not copy) into trash — the NAS trash
+folder, or Drive's 30-day trash — preserving their relative path, so trash
+grows its own mirrored subfolder structure as things get archived. Fully
+recoverable by moving a file back to where it came from.
+
+**`--limit` only trims the printed preview — it does not cap what `--commit`
+actually archives.** On a library with thousands of groups, `dedup nas
+--commit` archives *all* of them in one run regardless of `--limit`. To
+archive in batches instead, use `--max-groups`:
+```powershell
+docker exec media-vault-container python -m mediavault.cli dedup nas --max-groups 500 --commit
+```
 
 **On a large library, `dedup nas` listing every group one at a time isn't a
 useful way to sanity-check things before committing** — thousands of groups
