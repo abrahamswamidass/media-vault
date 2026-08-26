@@ -318,6 +318,26 @@ def test_interrupted_scan_resumes(nas, catalog):
     assert catalog.scan_state("nas")["complete"] == 1
 
 
+def test_resume_skip_phase_reports_on_list_for_every_directory(nas, catalog):
+    """The skip phase (fast-forwarding to the cursor) re-walks every prior
+    directory with otherwise zero progress output — on_list is what makes a
+    hang during it distinguishable from 'just resumed, nothing yet' (#11)."""
+    _write(nas, "A/one.jpg", b"1" * 500)
+    _write(nas, "B/two.jpg", b"2" * 500)
+    _write(nas, "C/three.jpg", b"3" * 500)
+    conn = NASConnector(str(nas))
+
+    catalog.begin_scan("nas", resume=False)
+    catalog.checkpoint("nas", "C", 0)  # pretend A and B are already done
+
+    listed = []
+    scan(conn, catalog, source="nas", on_list=listed.append)
+
+    # Every directory up to and including the cursor gets listed during the
+    # skip phase, not just the resume target.
+    assert listed[:4] == ["", "A", "B", "C"]
+
+
 def test_wasted_bytes_counts_only_the_extras(nas, catalog):
     _write(nas, "a.jpg", BIG, mtime=1_000_000)
     _write(nas, "b.jpg", BIG, mtime=2_000_000)

@@ -160,9 +160,16 @@ def cmd_index(args) -> int:
             # of --debug.
             print(f"    {i}/{total} {item_id}", flush=True)
 
+        def list_progress(directory):
+            # Covers the resume "skip phase" — fast-forwarding to a cursor
+            # re-walks every prior directory with zero other progress signal,
+            # so a hang there looks identical to "just resumed, nothing yet".
+            print(f"  listing: {directory or '/'}", flush=True)
+
         report = scanner.scan(connector, catalog, source=args.source,
                               resume=not args.restart, on_progress=progress,
-                              on_file=file_progress if args.debug else None)
+                              on_file=file_progress if args.debug else None,
+                              on_list=list_progress if args.debug else None)
 
         if args.json:
             _emit(report.__dict__, True)

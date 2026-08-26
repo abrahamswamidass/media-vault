@@ -44,16 +44,26 @@ class ScanReport:
         return self.errors == 0
 
 
-def walk_directories(connector: Connector, start: str = "") -> Iterator[str]:
+def walk_directories(connector: Connector, start: str = "",
+                     on_list: Optional[Callable[[str], None]] = None) -> Iterator[str]:
     """Yield every directory under `start`, parents before children, sorted.
 
     Deterministic ordering is what makes the resume cursor meaningful: the same
     tree always produces the same sequence, so "resume after X" is well defined.
+
+    on_list(directory), if given, fires right before each directory's
+    children are listed — including directories `scan()` is *skipping* while
+    fast-forwarding to a resume cursor. That skip phase re-walks (and
+    re-lists) every directory before the cursor with otherwise zero progress
+    output, so a hang during it looks identical to "resuming and nothing has
+    happened yet" — this is what tells them apart (see GitHub #11).
     """
     stack = [start]
     while stack:
         current = stack.pop(0)
         yield current
+        if on_list:
+            on_list(current)
         children = []
         try:
             for record in connector.list(current, limit=_NO_LIMIT):
@@ -72,6 +82,7 @@ def scan(
     resume: bool = True,
     on_progress: Optional[Callable[[ScanProgress], None]] = None,
     on_file: Optional[Callable[[str, int, int], None]] = None,
+    on_list: Optional[Callable[[str], None]] = None,
 ) -> ScanReport:
     """Index every file a connector can see. Resumable, checkpointed per directory.
 
@@ -80,6 +91,11 @@ def scan(
     because on_progress only fires once a whole directory finishes, which for
     a directory with hundreds/thousands of files can be many minutes with no
     signal at all of whether the scan is working or stuck (see GitHub #11).
+
+    on_list(directory), if given, fires before listing each directory's
+    children — see walk_directories()'s docstring. This covers the resume
+    "skip phase" that on_file/on_progress don't: fast-forwarding to a cursor
+    re-walks every prior directory with no other progress signal at all.
     """
     source = source or connector.name
     cursor = catalog.begin_scan(source, resume=resume)
@@ -91,7 +107,7 @@ def scan(
     error_samples: list[str] = []
     skipping = bool(cursor)
 
-    for directory in walk_directories(connector):
+    for directory in walk_directories(connector, on_list=on_list):
         # Resume: fast-forward past everything already committed. The cursor holds
         # the last *finished* directory, so skipping stops once we pass it.
         if skipping:

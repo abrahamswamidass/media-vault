@@ -108,6 +108,15 @@ docker exec media-vault-container python -m mediavault.cli index nas --debug
 ```
 Without this, a big directory and a genuinely stuck scan look identical.
 
+**Resuming after an interruption has its own silent phase, even with
+`--debug`**: fast-forwarding to the saved cursor re-walks (and re-lists)
+every directory that comes before it, and that "skip phase" produces zero
+output on its own — a hang during it looks exactly like "just resumed,
+nothing's happened yet," even though the actual problem directory might be
+completely different from the one named in "Resuming interrupted scan
+from: ...". `--debug` also prints `listing: <directory>` for each one as it's
+re-walked, so a stall shows you precisely which directory it's stuck on.
+
 ### Starting over (testing)
 
 While testing against a small folder, you'll often want to wipe the local
