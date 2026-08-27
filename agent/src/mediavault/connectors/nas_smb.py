@@ -273,6 +273,17 @@ class SMBNASConnector(Connector):
         if not commit:
             return self.dryrun_result("upload", str(src), detail=f"would copy -> {target_unc}", dest=target_unc)
         self._smb.makedirs(posixpath.dirname(target_unc.replace("\\", "/")).replace("/", "\\"), exist_ok=True)
-        self._smb.shutil.copyfile(str(src), target_unc)
+        # smbclient.shutil exists (mirrors stdlib shutil's API over SMB) but is
+        # a submodule, never accessible as smbclient.shutil unless something
+        # has separately done `import smbclient.shutil` first — plain `import
+        # smbclient` (used everywhere else in this file) does not pull it in,
+        # so this raised AttributeError on the very first real upload (#amazon
+        # staging). Writing the bytes directly is the same primitive read()
+        # already uses below, and gets the retry/reconnect wrapper for free.
+        self._retry(self._write_once, target_unc, src.read_bytes())
         return OpResult(ok=True, action="upload", target=target_unc, committed=True,
                         detail=f"copied {src.name} -> {target_unc}", data={"dest": target_unc})
+
+    def _write_once(self, unc: str, data: bytes) -> None:
+        with self._smb.open_file(unc, mode="wb") as f:
+            f.write(data)

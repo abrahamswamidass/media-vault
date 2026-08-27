@@ -208,3 +208,64 @@ def test_list_gets_metadata_from_scandir_with_no_extra_calls(fake_smbclient):
     assert records["img.jpg"].is_dir is False
     assert records["img.jpg"].size == 500
     assert records["img.jpg"].mtime == dt.replace(tzinfo=timezone.utc).timestamp()
+
+
+# --------------------------------------------------------------------------- #
+# upload() — regression: smbclient.shutil.copyfile() raised AttributeError
+# on the very first real use (staging a NAS item for Amazon over SMB).
+# smbclient.shutil is a real submodule, but plain `import smbclient` (used
+# everywhere in this file) never makes it accessible as smbclient.shutil —
+# that needs its own `import smbclient.shutil` this codebase never did.
+# --------------------------------------------------------------------------- #
+class _FakeRemoteFile:
+    def __init__(self, store, unc, mode):
+        self._store = store
+        self._unc = unc
+        self._mode = mode
+        self._buf = b""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if "w" in self._mode:
+            self._store[self._unc] = self._buf
+
+    def write(self, data: bytes) -> None:
+        self._buf += data
+
+
+@pytest.fixture
+def fake_smbclient_writable(fake_smbclient):
+    store: dict[str, bytes] = {}
+    fake_smbclient.makedirs = lambda *a, **k: None
+    fake_smbclient.open_file = lambda unc, mode: _FakeRemoteFile(store, unc, mode)
+    return fake_smbclient, store
+
+
+def test_upload_writes_bytes_without_touching_smbclient_shutil(fake_smbclient_writable, tmp_path):
+    fake, store = fake_smbclient_writable
+    conn = _connector(fake, root="")
+    # No `.shutil` attribute on the fake at all — if upload() ever reaches
+    # for it again, this raises AttributeError exactly like the real bug did.
+    assert not hasattr(fake, "shutil")
+
+    src = tmp_path / "img.jpg"
+    src.write_bytes(b"fake jpeg bytes")
+
+    result = conn.upload(str(src), dest="Photos/img.jpg", commit=True)
+
+    assert result.committed
+    assert store[conn._to_unc("Photos/img.jpg")] == b"fake jpeg bytes"
+
+
+def test_upload_dry_run_writes_nothing(fake_smbclient_writable, tmp_path):
+    fake, store = fake_smbclient_writable
+    conn = _connector(fake, root="")
+    src = tmp_path / "img.jpg"
+    src.write_bytes(b"fake jpeg bytes")
+
+    result = conn.upload(str(src), dest="Photos/img.jpg", commit=False)
+
+    assert not result.committed
+    assert store == {}
