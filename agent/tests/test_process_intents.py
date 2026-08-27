@@ -132,3 +132,82 @@ def test_a_fresh_claim_is_not_reclaimed_by_a_concurrent_run(tmp_path, monkeypatc
 
     store = LocalIntentsStore(str(intents_dir))
     assert store.peek_pending() == []
+
+
+# --------------------------------------------------------------------------- #
+# FirestoreIntentsStore — regression: the reclaim query used to filter
+# "status == claimed AND claimed_at < cutoff" as one query, which Firestore
+# rejects without a manually-created composite index (a real crash hit on
+# the very first live run — FAILED_PRECONDITION). Fixed to two single-field
+# equality queries, filtered client-side; this fake asserts that shape holds.
+# --------------------------------------------------------------------------- #
+class _FakeDocSnap:
+    def __init__(self, doc_id, data):
+        self.id = doc_id
+        self._data = data
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class _FakeDocRef:
+    def __init__(self, doc_id, store):
+        self.id = doc_id
+        self._store = store
+
+    def update(self, patch):
+        self._store[self.id].update(patch)
+
+
+class _FakeCollection:
+    def __init__(self, store, filters=()):
+        self._store = store
+        self._filters = filters
+
+    def where(self, field, op, value):
+        return _FakeCollection(self._store, (*self._filters, (field, op, value)))
+
+    def stream(self):
+        assert len(self._filters) <= 1, f"would need a composite index: {self._filters}"
+        items = self._store.items()
+        if self._filters:
+            field, op, value = self._filters[0]
+            assert op == "==", f"unsupported op in this fake: {op}"
+            items = [(k, v) for k, v in items if v.get(field) == value]
+        return iter(_FakeDocSnap(k, v) for k, v in items)
+
+    def document(self, doc_id):
+        return _FakeDocRef(doc_id, self._store)
+
+
+class _FakeClient:
+    def __init__(self, store):
+        self._store = store
+
+    def collection(self, name):
+        return _FakeCollection(self._store)
+
+
+def test_firestore_reclaim_never_issues_a_query_needing_a_composite_index(monkeypatch):
+    from mediavault.sync.intents_store import FirestoreIntentsStore
+
+    store_data = {
+        "p1": {"id": "p1", "type": "stage_for_amazon", "status": "pending",
+              "created_at": "2020-01-01T00:00:00+00:00"},
+        "stale": {"id": "stale", "type": "stage_for_amazon", "status": "claimed",
+                 "created_at": "2020-01-01T00:00:00+00:00",
+                 "claimed_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()},
+        "fresh": {"id": "fresh", "type": "stage_for_amazon", "status": "claimed",
+                 "created_at": "2020-01-01T00:00:00+00:00",
+                 "claimed_at": datetime.now(timezone.utc).isoformat()},
+        "done": {"id": "done", "type": "stage_for_amazon", "status": "done",
+                "created_at": "2020-01-01T00:00:00+00:00"},
+    }
+    fake_client = _FakeClient(store_data)
+    store = FirestoreIntentsStore()
+    monkeypatch.setattr(store, "_require_live", lambda: fake_client)
+
+    pending = store.peek_pending()
+
+    assert {r["id"] for r in pending} == {"p1", "stale"}
+

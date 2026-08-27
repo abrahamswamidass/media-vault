@@ -358,7 +358,11 @@ def cmd_publish(args) -> int:
                   f"(thumbnails -> {blobs.name}, metadata -> {facts.name}).")
             failed = result.outputs.get("failed") or []
             if failed:
-                print(f"{len(failed)} item(s) failed — see the journal.")
+                print(f"{len(failed)} item(s) failed:")
+                for f in failed[:10]:
+                    print(f"  ! {f['item_id']}: {f['error']}")
+                if len(failed) > 10:
+                    print(f"  ... and {len(failed) - 10} more (see the journal for all of them).")
         elif not args.commit and result.status == "ok":
             _banner(False)
         return 0 if result.status != "failed" else 1

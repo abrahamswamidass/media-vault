@@ -21,18 +21,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_stale(raw: dict, cutoff: datetime) -> bool:
+    """True if a 'claimed' intent's claim is old enough to assume the agent
+    that claimed it crashed mid-run, rather than still being in flight."""
+    claimed_at = raw.get("claimed_at")
+    if not claimed_at:
+        return True
+    return datetime.fromisoformat(claimed_at) < cutoff
+
+
 def _claimable(raw: dict) -> bool:
-    """Pending outright, or claimed long enough ago to assume the agent that
-    claimed it crashed mid-run rather than still being in flight."""
+    """Pending outright, or a stale claim (see `_is_stale`)."""
     if raw.get("status") == PENDING:
         return True
     if raw.get("status") != CLAIMED:
         return False
-    claimed_at = raw.get("claimed_at")
-    if not claimed_at:
-        return True
-    age = datetime.now(timezone.utc) - datetime.fromisoformat(claimed_at)
-    return age > timedelta(seconds=CLAIM_LEASE_SECONDS)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=CLAIM_LEASE_SECONDS)
+    return _is_stale(raw, cutoff)
 
 
 class LocalIntentsStore(IntentsStore):
@@ -119,15 +124,17 @@ class FirestoreIntentsStore(IntentsStore):
     def _pending_sorted(self, limit: int) -> list[dict]:
         client = self._require_live()
         coll = client.collection(self.collection)
-        # Two queries, merged client-side: Firestore can't OR across two
-        # different fields (status == pending; status == claimed AND
-        # claimed_at < cutoff) in one query without a composite setup this
-        # project doesn't otherwise need.
+        # Two single-field equality queries, merged and lease-filtered
+        # client-side — filtering "claimed AND claimed_at < cutoff" as one
+        # query needs a composite index (two different fields), which this
+        # project deliberately avoids setting up (no manual Firebase console
+        # step beyond pasting firestore.rules). A single equality filter
+        # never needs one, and the claimed set is small — only intents
+        # actively in flight, never the whole library.
         pending = list(coll.where("status", "==", PENDING).stream())
-        stale_cutoff = (datetime.now(timezone.utc)
-                        - timedelta(seconds=CLAIM_LEASE_SECONDS)).isoformat()
-        stale = list(coll.where("status", "==", CLAIMED)
-                    .where("claimed_at", "<", stale_cutoff).stream())
+        claimed = list(coll.where("status", "==", CLAIMED).stream())
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=CLAIM_LEASE_SECONDS)
+        stale = [d for d in claimed if _is_stale(d.to_dict(), stale_cutoff)]
         rows = [{**d.to_dict(), "id": d.id} for d in (*pending, *stale)]
         rows.sort(key=lambda r: r.get("created_at", ""))
         return rows[:limit]

@@ -283,3 +283,33 @@ def test_purge_facts_all_sources(nas, catalog, blobs, facts):
 
     assert deleted == 2
     assert list(facts.root.glob("*.json")) == []
+
+
+def test_cli_prints_the_actual_reason_for_a_partial_failure(tmp_path, capsys):
+    """Regression: a partial failure (some items published, some not) only
+    ever printed a bare count — "N item(s) failed — see the journal" — with
+    no way to see why short of digging through the action log by hand."""
+    from mediavault.cli import main
+
+    nas = tmp_path / "nas"
+    (nas / "Photos").mkdir(parents=True)
+    (nas / "Photos" / "ok.jpg").write_bytes(_jpeg_bytes())
+    (nas / "Photos" / "vanishes.jpg").write_bytes(_jpeg_bytes(color=(1, 2, 3)))
+    db = str(tmp_path / "cat.sqlite")
+
+    assert main(["index", "nas", "--root", str(nas), "--db", db, "--quiet"]) == 0
+    (nas / "Photos" / "vanishes.jpg").unlink()  # indexed, then removed before publish
+    capsys.readouterr()
+
+    exit_code = main([
+        "publish", "nas", "--root", str(nas), "--db", db, "--commit",
+        "--blob-dir", str(tmp_path / "blobs"), "--facts-dir", str(tmp_path / "facts"),
+        "--log-dir", str(tmp_path / "actions"),
+    ])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0  # a partial failure isn't a command failure
+    assert "Published 1 item(s)" in out
+    assert "1 item(s) failed:" in out
+    assert "Photos/vanishes.jpg" in out
+    assert "not found" in out.lower()
