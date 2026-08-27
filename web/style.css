@@ -160,15 +160,54 @@ nav a.active {
   background: #1c1c1c;
   border-radius: 8px;
   padding: 1.5rem;
-  max-width: 32rem;
+  max-width: 56rem;
   width: 100%;
+  max-height: calc(100vh - 3rem);
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.modal-media {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Caps the photo to the modal's own height budget so it can never push
+     the info column (or itself) past the viewport — the image scales
+     down, never the layout. */
+  max-height: calc(100vh - 6rem);
 }
 
 .modal-content img {
   display: block;
   width: 100%;
+  max-height: calc(100vh - 6rem);
   border-radius: 6px;
-  margin-bottom: 1rem;
+  object-fit: contain;
+}
+
+.modal-info {
+  flex: 0 0 16rem;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+}
+
+/* Narrow viewports: stack instead of side-by-side, same as before this
+   layout existed — the two-column form only makes sense with room to
+   actually show both at once. */
+@media (max-width: 40rem) {
+  .modal-content {
+    flex-direction: column;
+    max-width: 32rem;
+    overflow-y: auto;
+  }
+  .modal-info {
+    flex-basis: auto;
+    max-height: none;
+    overflow-y: visible;
+  }
+  .modal-content img {
+    margin-bottom: 1rem;
+  }
 }
 
 .modal-title {

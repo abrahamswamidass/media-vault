@@ -221,15 +221,19 @@ export function mount(container) {
     <div class="modal" hidden>
       <div class="modal-content">
         <button class="modal-close">&times;</button>
-        <img alt="" />
-        <p class="modal-title"></p>
-        <p class="modal-meta"></p>
-        <button class="modal-fullres" disabled
-          title="Not built yet — needs the agent-side intent processor (see backlog).">
-          Request full-res (coming soon)
-        </button>
-        <button class="modal-details-toggle" type="button">Details ▾</button>
-        <dl class="modal-details" hidden></dl>
+        <div class="modal-media">
+          <img alt="" />
+        </div>
+        <div class="modal-info">
+          <p class="modal-title"></p>
+          <p class="modal-meta"></p>
+          <button class="modal-fullres" disabled
+            title="Not built yet — needs the agent-side intent processor (see backlog).">
+            Request full-res (coming soon)
+          </button>
+          <button class="modal-details-toggle" type="button">Details ▾</button>
+          <dl class="modal-details" hidden></dl>
+        </div>
       </div>
     </div>
   `;
