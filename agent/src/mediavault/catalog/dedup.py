@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from ..ports import Connector
 from .store import Catalog
@@ -96,6 +96,7 @@ def find_duplicates(
     *,
     confirm: bool = True,
     min_size: int = 1,
+    on_confirm: Optional[Callable[[int, int, str], None]] = None,
 ) -> list[DuplicateGroup]:
     """Find exact-duplicate groups within one source and choose each survivor.
 
@@ -104,10 +105,29 @@ def find_duplicates(
     content actually differs is dropped from the group rather than archived. That
     verification needs a live `connector`; without one, groups come back
     unconfirmed and no action will archive them.
+
+    on_confirm(done, total, keeper_item_id), if given, fires right before each
+    group that actually needs a full-content read — not every group, since
+    anything at or under the quick-hash coverage window is confirmed for
+    free. On a library where most files exceed that window, confirmation can
+    mean thousands of full-file reads with otherwise zero progress output —
+    the same silent-but-working problem `index --debug` solved for scanning.
     """
     groups: list[DuplicateGroup] = []
+    raw_groups = catalog.duplicate_groups(source, min_size=min_size)
 
-    for rows in catalog.duplicate_groups(source, min_size=min_size):
+    # All members of a group share one size (it's embedded in quick_hash
+    # itself), so this needs no sorting — just a cheap in-memory pre-count,
+    # no I/O — to give on_confirm a real total instead of an unknown "?/?".
+    to_confirm_total = 0
+    if on_confirm and confirm and connector is not None:
+        to_confirm_total = sum(
+            1 for rows in raw_groups
+            if len(rows) >= 2 and (rows[0]["size"] or 0) > FULLY_COVERED_BY_QUICK_HASH
+        )
+    to_confirm = 0
+
+    for rows in raw_groups:
         if len(rows) < 2:
             continue
 
@@ -131,6 +151,9 @@ def find_duplicates(
         elif connector is None:
             group.confirm_note = "unconfirmed — no connector available to read contents"
         else:
+            to_confirm += 1
+            if on_confirm:
+                on_confirm(to_confirm, to_confirm_total, keeper["item_id"])
             group = _confirm(group, connector)
 
         groups.append(group)

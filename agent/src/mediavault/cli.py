@@ -197,9 +197,14 @@ def cmd_dedup(args) -> int:
             print(f"Nothing indexed for '{args.source}'. Run: mediavault index {args.source}")
             return 1
 
+        def confirm_progress(done, total, item_id):
+            count = f"{done}/{total}" if total else str(done)
+            print(f"  confirming {count}: {item_id}", flush=True)
+
         groups = dedup_mod.find_duplicates(
             catalog, args.source, connector,
-            confirm=not args.no_confirm, min_size=args.min_size)
+            confirm=not args.no_confirm, min_size=args.min_size,
+            on_confirm=confirm_progress if args.debug else None)
         summary = dedup_mod.summarize(groups)
 
         if args.by_folder:
@@ -557,6 +562,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "listing every group — read-only, ignores --commit")
     dd.add_argument("--depth", type=int, default=3,
                     help="path segments per folder bucket with --by-folder (default: 3)")
+    dd.add_argument("--debug", action="store_true",
+                    help="show live progress while confirming candidates — most files "
+                         "exceed the quick-hash coverage window, so confirming a large "
+                         "library means thousands of full-content reads with otherwise "
+                         "zero output")
     dd.set_defaults(_fn=cmd_dedup, permanent=False)
 
     # -- publish --

@@ -428,3 +428,38 @@ def test_confirm_survives_a_non_oserror_read_failure(nas, catalog):
     assert groups[0].confirmed is False
     assert "could not read keeper" in groups[0].confirm_note
     assert not groups[0].safe_to_archive
+
+
+# --------------------------------------------------------------------------- #
+# on_confirm progress — only fires for groups that actually need a real read
+# --------------------------------------------------------------------------- #
+def test_on_confirm_fires_only_for_groups_needing_a_real_read(nas, catalog):
+    _write(nas, "big_a.jpg", BIG, mtime=1_000_000)      # > quick-hash window
+    _write(nas, "big_b.jpg", BIG, mtime=2_000_000)
+    _write(nas, "small_a.jpg", b"tiny", mtime=1_000_000)  # <= window, free confirm
+    _write(nas, "small_b.jpg", b"tiny", mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    calls = []
+    groups = find_duplicates(catalog, "nas", conn, on_confirm=lambda d, t, i: calls.append((d, t, i)))
+
+    assert len(groups) == 2
+    # Only the BIG group needed a real read; the tiny one is free.
+    assert calls == [(1, 1, "big_a.jpg")]
+
+
+def test_on_confirm_reports_an_accurate_total_upfront(nas, catalog):
+    # Each group's content must itself exceed the 128KB quick-hash coverage
+    # window (BIG does — a distinct one-byte prefix per group is enough to
+    # give each its own quick_hash while staying well over that size).
+    for i in range(3):
+        content = bytes([i]) + BIG
+        _write(nas, f"g{i}_a.jpg", content, mtime=1_000_000)
+        _write(nas, f"g{i}_b.jpg", content, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    calls = []
+    find_duplicates(catalog, "nas", conn, on_confirm=lambda d, t, i: calls.append((d, t)))
+
+    assert [t for _d, t in calls] == [3, 3, 3]
+    assert [d for d, _t in calls] == [1, 2, 3]
