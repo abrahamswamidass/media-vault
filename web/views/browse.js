@@ -13,7 +13,7 @@
 // of strict order. Cosmetic only; not worth the complexity of reordering
 // sections to fully eliminate.
 import {
-  collection, query, orderBy, limit, startAfter, getDocs,
+  collection, query, orderBy, limit, startAfter, where, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
@@ -25,10 +25,15 @@ let statusEl = null;
 let groupsEl = null;
 let loadMoreBtn = null;
 let modal = null;
+let yearSelect = null;
 
 let lastDoc = null;
 let exhausted = false;
 let loading = false;
+// Jump target, in the same field/units the query actually orders by (mtime,
+// not effectiveDate — see the file header on why those can diverge). null
+// means "start from the newest item", same as the original behavior.
+let jumpBeforeMtime = null;
 const groupEls = new Map(); // "2026-08" -> <section> element, so pages merge into existing months
 
 function effectiveDate(item) {
@@ -109,8 +114,12 @@ async function loadPage() {
   loadMoreBtn.textContent = "Loading…";
   loadMoreBtn.disabled = true;
 
-  const clauses = [collection(db, "items"), orderBy("mtime", "desc"), limit(PAGE_SIZE)];
-  if (lastDoc) clauses.splice(2, 0, startAfter(lastDoc));
+  // A "<=" filter on the same field being ordered by (mtime) doesn't need a
+  // composite index in Firestore — this is the standard range-query shape.
+  const clauses = [collection(db, "items"), orderBy("mtime", "desc")];
+  if (jumpBeforeMtime !== null) clauses.push(where("mtime", "<=", jumpBeforeMtime));
+  if (lastDoc) clauses.push(startAfter(lastDoc));
+  clauses.push(limit(PAGE_SIZE));
 
   const snap = await getDocs(query(...clauses));
   if (snap.empty) {
@@ -131,13 +140,54 @@ async function loadPage() {
   loading = false;
   loadMoreBtn.textContent = "Load more";
   loadMoreBtn.disabled = false;
-  statusEl.textContent = exhausted && groupEls.size === 0 ? "Nothing published yet." : "";
+  statusEl.textContent = exhausted && groupEls.size === 0 ? "Nothing here." : "";
+}
+
+async function fetchYearRange() {
+  // Range reflects mtime (the field actually queried), not effectiveDate —
+  // consistent with how the jump filter itself has to work. Two 1-doc reads,
+  // cheap regardless of library size.
+  const [newestSnap, oldestSnap] = await Promise.all([
+    getDocs(query(collection(db, "items"), orderBy("mtime", "desc"), limit(1))),
+    getDocs(query(collection(db, "items"), orderBy("mtime", "asc"), limit(1))),
+  ]);
+  if (newestSnap.empty || oldestSnap.empty) return null;
+  return {
+    maxYear: new Date(newestSnap.docs[0].data().mtime * 1000).getFullYear(),
+    minYear: new Date(oldestSnap.docs[0].data().mtime * 1000).getFullYear(),
+  };
+}
+
+function populateYearSelect(range) {
+  yearSelect.innerHTML = '<option value="">Newest</option>';
+  if (!range) return;
+  for (let y = range.maxYear; y >= range.minYear; y--) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    yearSelect.appendChild(opt);
+  }
+}
+
+function resetAndLoad() {
+  lastDoc = null;
+  exhausted = false;
+  groupEls.clear();
+  groupsEl.innerHTML = "";
+  loadMoreBtn.hidden = false;
+  loadPage().catch((err) => {
+    statusEl.textContent = `Failed to load: ${err.message}`;
+    console.error(err);
+  });
 }
 
 export function mount(container) {
   root = container;
   root.innerHTML = `
-    <p class="view-status"></p>
+    <div class="browse-toolbar">
+      <label>Jump to <select class="year-jump"><option value="">Newest</option></select></label>
+      <p class="view-status"></p>
+    </div>
     <div class="month-groups"></div>
     <button class="load-more">Load more</button>
     <div class="modal" hidden>
@@ -157,18 +207,22 @@ export function mount(container) {
   groupsEl = root.querySelector(".month-groups");
   loadMoreBtn = root.querySelector(".load-more");
   modal = root.querySelector(".modal");
+  yearSelect = root.querySelector(".year-jump");
 
   loadMoreBtn.addEventListener("click", loadPage);
   modal.querySelector(".modal-close").addEventListener("click", () => { modal.hidden = true; });
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
-
-  lastDoc = null;
-  exhausted = false;
-  groupEls.clear();
-  loadPage().catch((err) => {
-    statusEl.textContent = `Failed to load: ${err.message}`;
-    console.error(err);
+  yearSelect.addEventListener("change", () => {
+    const year = yearSelect.value;
+    // "<= end of that year" (Dec 31, 23:59:59 local) so the jump lands on
+    // the most recent item in the chosen year, not before it.
+    jumpBeforeMtime = year ? new Date(Number(year), 11, 31, 23, 59, 59).getTime() / 1000 : null;
+    resetAndLoad();
   });
+
+  jumpBeforeMtime = null;
+  resetAndLoad();
+  fetchYearRange().then(populateYearSelect).catch((err) => console.error("year range:", err));
 }
 
 export function unmount() {
