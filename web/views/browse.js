@@ -96,6 +96,31 @@ function renderCard(item) {
   return card;
 }
 
+//: field, label — in display order. Blank/undefined values are skipped.
+const DETAIL_FIELDS = [
+  ["source", "Source"],
+  ["mime", "Type"],
+  ["quick_hash", "Quick hash"],
+  ["thumbnail_key", "Thumbnail key"],
+];
+
+function renderDetails(item) {
+  const dl = modal.querySelector(".modal-details");
+  dl.innerHTML = "";
+  const rows = [
+    ...DETAIL_FIELDS.map(([field, label]) => [label, item[field]]),
+    ["Modified", item.mtime ? new Date(item.mtime * 1000).toLocaleString() : null],
+  ];
+  for (const [label, value] of rows) {
+    if (!value) continue;
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    dl.append(dt, dd);
+  }
+}
+
 function openModal(item, thumbUrl) {
   modal.querySelector("img").src = thumbUrl || "";
   modal.querySelector(".modal-title").textContent = item.item_id;
@@ -105,6 +130,9 @@ function openModal(item, thumbUrl) {
     `${dims}${(item.size / 1024).toFixed(0)} KB · `
     + `${new Date(effectiveDate(item) * 1000).toLocaleString()}`
     + (camera ? ` · ${camera}` : "");
+  renderDetails(item);
+  modal.querySelector(".modal-details").hidden = true;
+  modal.querySelector(".modal-details-toggle").textContent = "Details ▾";
   modal.hidden = false;
 }
 
@@ -200,6 +228,8 @@ export function mount(container) {
           title="Not built yet — needs the agent-side intent processor (see backlog).">
           Request full-res (coming soon)
         </button>
+        <button class="modal-details-toggle" type="button">Details ▾</button>
+        <dl class="modal-details" hidden></dl>
       </div>
     </div>
   `;
@@ -212,6 +242,11 @@ export function mount(container) {
   loadMoreBtn.addEventListener("click", loadPage);
   modal.querySelector(".modal-close").addEventListener("click", () => { modal.hidden = true; });
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
+  modal.querySelector(".modal-details-toggle").addEventListener("click", () => {
+    const details = modal.querySelector(".modal-details");
+    details.hidden = !details.hidden;
+    modal.querySelector(".modal-details-toggle").textContent = details.hidden ? "Details ▾" : "Details ▴";
+  });
   yearSelect.addEventListener("change", () => {
     const year = yearSelect.value;
     // "<= end of that year" (Dec 31, 23:59:59 local) so the jump lands on
