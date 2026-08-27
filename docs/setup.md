@@ -137,10 +137,16 @@ candidate over 128 KB gets a full-content read to confirm it (see
 "Deduplication" below) — on a large library that's thousands of reads over
 the same connection that can drop. A connector's own connection-drop
 exception used to slip past this step's narrower error handling and crash
-the whole `dedup` run (discarding all the confirmation work already done,
-since it isn't checkpointed the way indexing is); now it's treated as "can't
-confirm this one, leave it alone" instead — safe by construction, since an
-unconfirmed group never archives.
+the whole `dedup` run; now it's treated as "can't confirm this one, leave it
+alone" instead — safe by construction, since an unconfirmed group never
+archives.
+
+**Confirmed hashes are cached in the catalog, per file, as they're computed**
+— not just at the end of a run. An interrupted `dedup` (a crash, a killed
+container, Ctrl+C) never loses that work: whatever was confirmed before the
+interruption is already saved, and re-running only reads the files it hasn't
+confirmed yet. A file that's re-indexed with different content automatically
+invalidates its cached hash, so this never risks reusing a stale result.
 
 **The skip phase itself is also much faster now.** It used to fetch full
 metadata (type, size, modified time) for every file with 3 separate network

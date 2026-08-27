@@ -89,6 +89,26 @@ def _full_hash(connector: Connector, item_id: str) -> str:
     return h.hexdigest()
 
 
+def _full_hash_cached(catalog: Optional[Catalog], connector: Connector,
+                      source: str, row: sqlite3.Row) -> str:
+    """Reuse a full hash already confirmed in a prior run, if one is on file.
+
+    `full_hash` is a real column on `items`, auto-invalidated by `Catalog.upsert`
+    whenever `quick_hash` changes (i.e. the file's content actually changed on
+    re-index) — so a cached value here is always for the *current* content, no
+    separate staleness check needed. Without this, every dedup run re-reads and
+    re-hashes every candidate from zero regardless of what a prior run already
+    confirmed — the expensive, network-bound part of confirmation.
+    """
+    cached = row["full_hash"]
+    if cached:
+        return cached
+    computed = _full_hash(connector, row["item_id"])
+    if catalog is not None:
+        catalog.set_full_hash(source, row["item_id"], computed)
+    return computed
+
+
 def find_duplicates(
     catalog: Catalog,
     source: str,
@@ -154,14 +174,15 @@ def find_duplicates(
             to_confirm += 1
             if on_confirm:
                 on_confirm(to_confirm, to_confirm_total, keeper["item_id"])
-            group = _confirm(group, connector)
+            group = _confirm(group, connector, catalog=catalog, source=source)
 
         groups.append(group)
 
     return sorted(groups, key=lambda g: g.reclaimable_bytes, reverse=True)
 
 
-def _confirm(group: DuplicateGroup, connector: Connector) -> DuplicateGroup:
+def _confirm(group: DuplicateGroup, connector: Connector, *,
+             catalog: Optional[Catalog] = None, source: str = "") -> DuplicateGroup:
     """Fully hash every member; drop any that isn't genuinely identical.
 
     Files can share a size and both end windows and still differ in the middle —
@@ -176,9 +197,12 @@ def _confirm(group: DuplicateGroup, connector: Connector) -> DuplicateGroup:
     this function, the connector has already exhausted its own retry/reconnect
     attempts, so treating it as "can't confirm this one, move on" is the
     correct, safe response, not a crash of the whole confirmation pass.
+
+    With a `catalog` given, each hash is persisted (and reused, if already
+    present) via `_full_hash_cached` — see its docstring for why that's safe.
     """
     try:
-        keeper_hash = _full_hash(connector, group.keeper["item_id"])
+        keeper_hash = _full_hash_cached(catalog, connector, source, group.keeper)
     except Exception as e:
         group.confirmed = False
         group.confirm_note = f"could not read keeper: {e}"
@@ -187,7 +211,7 @@ def _confirm(group: DuplicateGroup, connector: Connector) -> DuplicateGroup:
     identical, differing = [], []
     for row in group.losers:
         try:
-            if _full_hash(connector, row["item_id"]) == keeper_hash:
+            if _full_hash_cached(catalog, connector, source, row) == keeper_hash:
                 identical.append(row)
             else:
                 differing.append(row)

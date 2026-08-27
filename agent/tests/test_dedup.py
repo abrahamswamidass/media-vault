@@ -463,3 +463,49 @@ def test_on_confirm_reports_an_accurate_total_upfront(nas, catalog):
 
     assert [t for _d, t in calls] == [3, 3, 3]
     assert [d for d, _t in calls] == [1, 2, 3]
+
+
+# --------------------------------------------------------------------------- #
+# full_hash caching — a confirmed hash survives into the catalog and is
+# reused by a later run instead of triggering another full-content read.
+# --------------------------------------------------------------------------- #
+def test_confirmation_persists_full_hash_to_the_catalog(nas, catalog):
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", BIG, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    find_duplicates(catalog, "nas", conn)
+
+    row = catalog.conn.execute(
+        "SELECT full_hash FROM items WHERE item_id = 'a.jpg'").fetchone()
+    assert row["full_hash"]  # a real hex digest, not NULL
+
+
+def test_a_second_run_reuses_the_cached_hash_without_reading_again(nas, catalog):
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", BIG, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+    find_duplicates(catalog, "nas", conn)  # first run: populates full_hash
+
+    reads = []
+    real_read = conn.read
+    conn.read = lambda item_id, nbytes=0: (reads.append(item_id), real_read(item_id, nbytes))[1]
+
+    groups = find_duplicates(catalog, "nas", conn)  # second run: should hit cache
+
+    assert reads == []
+    assert groups[0].confirmed and groups[0].losers
+
+
+def test_reindexing_a_changed_file_invalidates_its_cached_hash(nas, catalog):
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", BIG, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+    find_duplicates(catalog, "nas", conn)  # populates full_hash for both
+
+    _write(nas, "a.jpg", BIG + b"more", mtime=1_000_000)
+    scan(conn, catalog, source="nas")  # re-index: quick_hash changes for a.jpg
+
+    row = catalog.conn.execute(
+        "SELECT full_hash FROM items WHERE item_id = 'a.jpg'").fetchone()
+    assert row["full_hash"] is None  # stale hash cleared, not silently reused
