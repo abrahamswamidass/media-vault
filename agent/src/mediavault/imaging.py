@@ -23,6 +23,29 @@ class ImagingUnavailable(RuntimeError):
     """Pillow isn't installed, so this build can't derive images."""
 
 
+_heif_registered = False
+
+
+def _register_heif() -> None:
+    """Teach Pillow to open HEIC/HEIF — the default photo format on iPhones
+    since iOS 11, and otherwise completely opaque to plain Pillow (raises
+    "cannot identify image file", not a clear "unsupported format" error).
+    Soft-optional like Pillow itself: if pillow-heif isn't installed, HEIC
+    files just keep failing with that same unclear error rather than this
+    module refusing to load altogether.
+    """
+    global _heif_registered
+    if _heif_registered:
+        return
+    try:
+        import pillow_heif  # noqa: PLC0415 — optional dependency, imported on use
+
+        pillow_heif.register_heif_opener()
+    except ImportError:
+        pass
+    _heif_registered = True
+
+
 def _pillow():
     try:
         from PIL import Image  # noqa: PLC0415 — optional dependency, imported on use
@@ -31,6 +54,7 @@ def _pillow():
             "Pillow is required to derive thumbnails/previews. "
             "pip install Pillow (already listed in requirements.txt)."
         ) from e
+    _register_heif()
     return Image
 
 

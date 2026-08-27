@@ -201,6 +201,11 @@ network call. Without `GCS_LIVE=1`, thumbnails land in a local folder
 is configured, to see what it would do. With `GCS_LIVE=1`, both go to the real
 Cloud Storage bucket and Firestore (see "Cloud mirror" below).
 
+**HEIC (the default iPhone photo format since iOS 11) decodes out of the
+box** — `pillow-heif` is baked into the image alongside Pillow itself, no
+extra setup. Without it, every HEIC would fail with an unhelpful "cannot
+identify image file" rather than publishing.
+
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates where present) via the
 `exiftool`/PyExifTool already baked into the image — no extra setup needed.

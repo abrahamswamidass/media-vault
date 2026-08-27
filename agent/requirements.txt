@@ -13,6 +13,12 @@ PyExifTool>=0.5.6
 Pillow>=10.0.0
 ImageHash>=4.3.1
 
+# --- HEIC/HEIF decoding (the default iPhone photo format since iOS 11) ------
+# Plain Pillow can't open these at all — raises "cannot identify image file",
+# not a clear "unsupported format" error. imaging.py registers this opener
+# automatically the first time it touches Pillow; nothing else to configure.
+pillow-heif>=0.15.0
+
 # --- Google Drive live connector (set DRIVE_LIVE=1 to use) ------------------
 google-api-python-client>=2.100.0
 google-auth-oauthlib>=1.2.0
