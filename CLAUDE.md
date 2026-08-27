@@ -35,11 +35,14 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  app. app.js is a sign-in gate + hash router; each tab is a
                  view module (views/browse.js, map.js, duplicates.js,
                  amazon.js) exporting mount()/unmount(). Browse (chronological
-                 grid, paginated) and Map (geotagged items on a Leaflet/OSM
-                 map) are functional; duplicates/amazon are stubs — see their
-                 file comments for what's blocking each. Single-
-                 user Google sign-in; access is gated server-side by
-                 firestore.rules/storage.rules (owner email hardcoded there),
+                 grid, paginated), Map (geotagged items on a Leaflet/OSM map),
+                 and Amazon (read-only status of staged intents) are
+                 functional; duplicates is a stub — see its file comment for
+                 what's blocking it. Picking a photo to stage happens in
+                 Browse/Map's own UI (intents.js), not in the Amazon tab
+                 itself. Single-user Google sign-in; access is gated
+                 server-side by firestore.rules/storage.rules (owner email
+                 hardcoded there),
                  not by hiding the URL. See docs/setup.md's "Web viewer".
 shared/contracts/ JSON Schema both modules validate against. Change here first.
 docs/            architecture.html, setup.md, command-catalog.html

@@ -106,6 +106,42 @@ class FactsStore(ABC):
 
 
 # --------------------------------------------------------------------------- #
+# The intents port — where the web module's requests come from
+# --------------------------------------------------------------------------- #
+class IntentsStore(ABC):
+    """Somewhere the web module writes requests and the agent picks them up.
+
+    The other half of "intents in, facts out": `FactsStore` is the agent's only
+    write path to the web module, this is the agent's only *read* path from it.
+    Per CLAUDE.md's write-ownership rule, `intents/` is web-written except
+    `status`/`claimed_at`/`result`, which only these methods ever touch.
+    Adapters live in `sync/intents_store.py`; the claim/dispatch logic itself
+    (the `Intent` dataclass, `REGISTRY`, `handle()`) lives in `sync/intents.py`.
+    """
+    name: str = "intents"
+
+    @abstractmethod
+    def peek_pending(self, limit: int = 10) -> list[dict]:
+        """Read up to `limit` pending intents, oldest first. Never mutates
+        anything — this is what a dry-run preview shows."""
+
+    @abstractmethod
+    def claim_pending(self, limit: int = 10) -> list[dict]:
+        """Atomically move up to `limit` pending intents to 'claimed' and
+        return them, oldest first. Also reclaims any intent whose claim is
+        older than the lease (an agent that crashed mid-run, not a second
+        writer — this project runs one agent)."""
+
+    @abstractmethod
+    def complete(self, intent_id: str, result: dict) -> None:
+        """Mark one intent 'done', with its ActionResult."""
+
+    @abstractmethod
+    def fail(self, intent_id: str, result: dict) -> None:
+        """Mark one intent 'failed', with its ActionResult (or error dict)."""
+
+
+# --------------------------------------------------------------------------- #
 # The interface every connector implements
 # --------------------------------------------------------------------------- #
 class Connector(ABC):

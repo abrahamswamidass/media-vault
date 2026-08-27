@@ -17,6 +17,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
+import { stageForAmazon } from "../intents.js";
 
 const PAGE_SIZE = 100;
 
@@ -151,7 +152,30 @@ function openModal(item) {
   modal.querySelector(".modal-details-toggle").textContent = "Details ▾";
   modal.querySelector(".modal-prev").disabled = currentIndex <= 0;
   modal.querySelector(".modal-next").disabled = currentIndex >= renderedItems.length - 1;
+  const stageBtn = modal.querySelector(".modal-stage-amazon");
+  stageBtn.disabled = false;
+  stageBtn.textContent = "Stage for Amazon";
+  modal.querySelector(".modal-stage-status").textContent = "";
   modal.hidden = false;
+}
+
+async function handleStageForAmazon() {
+  const item = renderedItems[currentIndex];
+  if (!item) return;
+  const btn = modal.querySelector(".modal-stage-amazon");
+  const status = modal.querySelector(".modal-stage-status");
+  btn.disabled = true;
+  btn.textContent = "Staging…";
+  try {
+    await stageForAmazon(item);
+    btn.textContent = "Staged ✓";
+    status.textContent = "Waiting for the agent to pick it up — see the Amazon tab.";
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Stage for Amazon";
+    status.textContent = `Failed: ${err.message}`;
+    console.error(item.item_id, err);
+  }
 }
 
 function showAt(index) {
@@ -263,9 +287,11 @@ export function mount(container) {
           <p class="modal-title"></p>
           <p class="modal-meta"></p>
           <button class="modal-fullres" disabled
-            title="Not built yet — needs the agent-side intent processor (see backlog).">
+            title="Not wired up yet — the agent-side processor now exists (process-intents), this button just doesn't call it yet.">
             Request full-res (coming soon)
           </button>
+          <button class="modal-stage-amazon" type="button">Stage for Amazon</button>
+          <p class="modal-stage-status"></p>
           <button class="modal-details-toggle" type="button">Details ▾</button>
           <dl class="modal-details" hidden></dl>
         </div>
@@ -288,6 +314,7 @@ export function mount(container) {
   });
   modal.querySelector(".modal-prev").addEventListener("click", () => showAt(currentIndex - 1));
   modal.querySelector(".modal-next").addEventListener("click", () => showAt(currentIndex + 1));
+  modal.querySelector(".modal-stage-amazon").addEventListener("click", handleStageForAmazon);
   // Attached to document (not the modal) since arrow keys should work
   // regardless of what currently has focus. Removed in unmount() — a
   // document-level listener outlives this view's own DOM otherwise, and

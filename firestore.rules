@@ -2,15 +2,43 @@ rules_version = '2';
 
 // Single-user gate: only the owner's Google account can read. Enforced here
 // server-side — the client UI hiding the sign-in button is not what makes
-// this private, this rule is. Writes are always denied: the agent writes via
-// a service-account Admin client, which bypasses these rules entirely, so
-// `intents/` staying web-writable would need its own rule when that lands.
+// this private, this rule is.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /items/{itemId} {
+      // Agent-only writes — the agent writes via a service-account Admin
+      // client, which bypasses these rules entirely regardless of what's
+      // allowed here.
       allow read: if request.auth != null
                   && request.auth.token.email == "winfredbe@gmail.com";
       allow write: if false;
+    }
+
+    // The web module's only write path: it proposes a request here, the
+    // agent (also via the Admin client, same as above) claims it, runs it,
+    // and writes status/claimed_at/result back — see sync/intents.py.
+    // Create-only: once written, an intent is never updated or deleted by
+    // the client, only read (to show its eventual result).
+    match /intents/{intentId} {
+      allow read: if request.auth != null
+                  && request.auth.token.email == "winfredbe@gmail.com";
+
+      allow create: if request.auth != null
+                    && request.auth.token.email == "winfredbe@gmail.com"
+                    && request.resource.data.keys().hasOnly(
+                         ["id", "type", "item_id", "params", "status", "created_at"])
+                    && request.resource.data.id == intentId
+                    && request.resource.data.status == "pending"
+                    && request.resource.data.params is map
+                    // Kept in sync by hand with intent.schema.json's `type`
+                    // enum and sync/intents.py's REGISTRY — this is a
+                    // client-tamper guard, not the authoritative list; the
+                    // agent refuses anything not in REGISTRY regardless.
+                    && request.resource.data.type in [
+                         "fetch_fullres", "thumbnail", "delete", "copy", "move",
+                         "index", "dedup_source", "publish", "stage_for_amazon"
+                       ];
+      allow update, delete: if false;
     }
   }
 }

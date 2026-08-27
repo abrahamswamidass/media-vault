@@ -15,6 +15,8 @@ Media Vault agent CLI.
 
     mediavault amazon-stage <item-id> --commit stage a NAS item for Amazon (no local file needed)
 
+    mediavault process-intents --commit        claim and run requests the web module wrote
+
 SAFETY: everything that mutates is dry-run by default. Add --commit to apply.
 NAS deletes are soft — the file moves to the trash folder and stays recoverable.
 """
@@ -83,6 +85,34 @@ def _facts_for(args):
         return FirestoreFactsStore()
     from .sync.facts import LocalFactsStore
     return LocalFactsStore(getattr(args, "facts_dir", None) or os.getenv("FACTS_CACHE", "/data/catalog/facts"))
+
+
+def _intents_for(args):
+    """FirestoreIntentsStore when GCS_LIVE=1, else a local folder of JSON files."""
+    if os.getenv("GCS_LIVE", "0") == "1":
+        from .sync.intents_store import FirestoreIntentsStore
+        return FirestoreIntentsStore()
+    from .sync.intents_store import LocalIntentsStore
+    return LocalIntentsStore(getattr(args, "intents_dir", None) or os.getenv("INTENTS_CACHE", "/data/catalog/intents"))
+
+
+class _LazyConnectors:
+    """A dict-like `AgentContext.connectors` that builds (and caches) a
+    connector only the first time an intent actually needs it, instead of
+    eagerly building all four up front — a batch of intents that never
+    touches Drive shouldn't fail just because Drive isn't configured."""
+
+    def __init__(self):
+        self._built: dict = {}
+
+    def __contains__(self, name: str) -> bool:
+        return name in CONNECTORS
+
+    def __getitem__(self, name: str):
+        if name not in self._built:
+            self._built[name] = build_connector(
+                name, argparse.Namespace(root=None, trash=None, permanent=False))
+        return self._built[name]
 
 
 def _connector_for(source: str, args):
@@ -445,6 +475,59 @@ def cmd_amazon_stage(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# process-intents
+# --------------------------------------------------------------------------- #
+def cmd_process_intents(args) -> int:
+    from . import sync as sync_mod
+
+    intents_store = _intents_for(args)
+
+    if not args.commit:
+        pending = intents_store.peek_pending(limit=args.limit)
+        if not pending:
+            print("No pending intents.")
+            return 0
+        print(f"{len(pending)} pending intent(s):")
+        for raw in pending:
+            print(f"  {raw['type']} {raw['item_id']} {raw.get('params') or ''}".rstrip())
+        _banner(False)
+        return 0
+
+    with _catalog(args) as catalog:
+        ctx = sync_mod.AgentContext(
+            connectors=_LazyConnectors(), blobs=_blobs_for(args),
+            catalog=catalog, facts=_facts_for(args))
+
+        claimed = intents_store.claim_pending(limit=args.limit)
+        if not claimed:
+            print("No pending intents.")
+            return 0
+
+        log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+        done = failed = 0
+        for raw in claimed:
+            intent = sync_mod.Intent(**raw)
+            print(f"{intent.type} {intent.item_id} ...", flush=True)
+            try:
+                result = log.record(sync_mod.handle(intent, ctx, commit=True))
+            except Exception as e:
+                failed += 1
+                intents_store.fail(intent.id, {"error": f"{type(e).__name__}: {e}"})
+                print(f"  crashed: {e}")
+                continue
+            if result.ok:
+                done += 1
+                intents_store.complete(intent.id, result.to_dict())
+            else:
+                failed += 1
+                intents_store.fail(intent.id, result.to_dict())
+            print(f"  {result.status}: {result.detail}")
+
+        print(f"\n{done} done, {failed} failed.")
+        return 0 if failed == 0 else 1
+
+
+# --------------------------------------------------------------------------- #
 # drive-login
 # --------------------------------------------------------------------------- #
 def cmd_drive_login(args) -> int:
@@ -688,6 +771,27 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--port", type=int, default=8080,
                     help="local callback port — must match a published container port")
     dl.set_defaults(_fn=cmd_drive_login)
+
+    # -- process-intents --
+    pi = sub.add_parser(
+        "process-intents",
+        help="claim and run requests the web module has written",
+        description="The agent's read side of the intents/ collection — the web "
+                    "module can't touch files itself, it only writes a request "
+                    "(e.g. 'stage this for Amazon') and this claims pending ones, "
+                    "runs them through the same Action classes every other command "
+                    "uses, and writes status/result back. Without --commit this "
+                    "only lists what's pending — it doesn't claim or run anything, "
+                    "same dry-run-by-default rule as everywhere else.")
+    pi.add_argument("--db", help="catalog database path")
+    pi.add_argument("--blob-dir", help="local thumbnail folder (ignored if GCS_LIVE=1)")
+    pi.add_argument("--facts-dir", help="local facts folder (ignored if GCS_LIVE=1)")
+    pi.add_argument("--intents-dir", help="local intents folder (ignored if GCS_LIVE=1)")
+    pi.add_argument("--log-dir", help="where to write the action journal")
+    pi.add_argument("--limit", type=int, default=10, help="claim at most this many intents")
+    pi.add_argument("--commit", action="store_true",
+                    help="ACTUALLY claim and run them (default: preview only)")
+    pi.set_defaults(_fn=cmd_process_intents)
 
     # -- connectors --
     for name in CONNECTORS:

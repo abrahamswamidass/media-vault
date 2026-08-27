@@ -107,6 +107,8 @@ after it (and the sections further down) explain the *why* behind each one.
 | `index drive` | Resumable walk into the catalog, same as `index nas`. Needs `DRIVE_LIVE=1` and a saved token. |
 | `dedup drive [--commit]` | Preview / archive Drive duplicates — same flags as `dedup nas` (`--by-folder`, `--debug`, `--max-groups`, ...). |
 | `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
+| `process-intents` | Preview what the web module has requested — read-only, claims/runs nothing. |
+| `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. See [Web viewer](#web-viewer). |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
@@ -262,7 +264,13 @@ anything.
 
 ### Amazon
 
-Two ways to stage a file — pick whichever matches where it already is.
+Three ways to stage a file — pick whichever matches where it already is.
+
+**From the web viewer**: click a photo in Browse or Map, then "Stage for
+Amazon" — this writes an intent, it doesn't stage the file immediately. Run
+`process-intents --commit` (a one-off, or on a schedule — see
+[Web viewer](#web-viewer)) for the agent to actually pick it up. The Amazon
+tab shows the result once it has one.
 
 **From the NAS directly** (the common case — no local file needed):
 ```powershell
@@ -398,6 +406,18 @@ owner email — not by hiding the URL. GCS's `allUsers` IAM grant explicitly
 cannot be scoped to a prefix (Google rejects conditions on public principals),
 so this is the actual private-by-default path, not a workaround.
 
+**Staging a photo for Amazon** works from Browse or Map's own photo view
+(click a photo → "Stage for Amazon"). That button only *writes a request* —
+the web module can't touch the NAS itself (see CLAUDE.md's three rules). The
+agent has to actually pick it up:
+```powershell
+docker exec media-vault-container python -m mediavault.cli process-intents --commit
+```
+Run that whenever, or put it on the same schedule as `index`/`publish` if you
+want staging to happen automatically. The **Amazon** tab is read-only — it
+lists what's been requested and its current status (waiting / working /
+staged / failed), not a picker of its own.
+
 ### 1. Add Firebase to the project
 
 1. [Firebase console](https://console.firebase.google.com) → **Add project**
@@ -430,6 +450,10 @@ select the agent's bucket there instead.
 Both files already have `winfredbe@gmail.com` hardcoded as the only allowed
 reader — edit that line in both files first if it should be a different
 account.
+
+**If you set this up before Amazon staging existed**, re-paste
+`firestore.rules` — it now also covers the `intents/` collection ("Stage for
+Amazon" writes there), which an older ruleset would silently reject.
 
 ### 5. Fill in the config
 

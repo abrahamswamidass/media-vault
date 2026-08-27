@@ -11,6 +11,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
+import { stageForAmazon } from "../intents.js";
 
 // A browser map gets sluggish with tens of thousands of individual markers —
 // this is a preview of where your library has been, not a full data dump.
@@ -54,7 +55,29 @@ function popupContent(item) {
   const name = document.createElement("div");
   name.className = "map-popup-name";
   name.textContent = item.item_id;
-  wrap.append(img, name);
+
+  const stageBtn = document.createElement("button");
+  stageBtn.type = "button";
+  stageBtn.className = "map-popup-stage";
+  stageBtn.textContent = "Stage for Amazon";
+  const status = document.createElement("div");
+  status.className = "map-popup-status";
+  stageBtn.addEventListener("click", async () => {
+    stageBtn.disabled = true;
+    stageBtn.textContent = "Staging…";
+    try {
+      await stageForAmazon(item);
+      stageBtn.textContent = "Staged ✓";
+      status.textContent = "See the Amazon tab once the agent picks it up.";
+    } catch (err) {
+      stageBtn.disabled = false;
+      stageBtn.textContent = "Stage for Amazon";
+      status.textContent = `Failed: ${err.message}`;
+      console.error(item.item_id, err);
+    }
+  });
+
+  wrap.append(img, name, stageBtn, status);
   return wrap;
 }
 
