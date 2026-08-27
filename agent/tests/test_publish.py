@@ -169,6 +169,25 @@ def test_unindexed_item_without_hash_is_skipped(nas, catalog, blobs, facts):
     assert catalog.published_count("nas") == 0
 
 
+def test_all_items_failing_surfaces_a_real_reason_not_a_generic_noop(nas, catalog, blobs):
+    """Regression: a total failure used to collapse into the same generic
+    "no items could be published" message as a legitimate no-op, discarding
+    every per-item error — no way to tell "nothing to do" from "everything
+    broke" without digging into code neither the CLI nor caller can reach."""
+    conn = _indexed(nas, catalog)
+
+    class BrokenFacts:
+        name = "broken"
+        def put(self, source, item_id, fact):
+            raise RuntimeError("Firestore permission denied")
+
+    result = PublishAction("nas", conn, catalog, blobs, BrokenFacts()).run(commit=True)
+
+    assert result.status == STATUS_NOOP
+    assert "1 failed" in result.detail
+    assert "Firestore permission denied" in result.detail
+
+
 def test_missing_source_index_fails_validation(tmp_path, catalog, blobs, facts):
     root = tmp_path / "empty_nas"
     root.mkdir()

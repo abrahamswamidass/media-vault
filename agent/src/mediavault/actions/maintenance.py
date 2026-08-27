@@ -250,5 +250,13 @@ class PublishAction(Action):
             self.catalog.conn.commit()
 
         if not published:
+            # A NoOp's outputs never reach the caller (Action.run() discards
+            # them on this path) — without surfacing at least one real reason
+            # here, "every item failed" and "nothing needed doing" print the
+            # exact same message, with no way to tell which happened.
+            if failed:
+                sample = failed[0]
+                raise NoOp(f"no items could be published — {len(failed)} failed, "
+                          f"e.g. {sample['item_id']}: {sample['error']}")
             raise NoOp("no items could be published")
         return {"published": len(published), "failed": failed}
