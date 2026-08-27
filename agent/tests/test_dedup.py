@@ -497,6 +497,22 @@ def test_a_second_run_reuses_the_cached_hash_without_reading_again(nas, catalog)
     assert groups[0].confirmed and groups[0].losers
 
 
+def test_each_cached_hash_commits_immediately_not_at_the_end_of_the_run(nas, catalog):
+    """Regression: set_full_hash() used to write without committing, so the
+    whole confirmation pass ran inside one long-lived open transaction —
+    both a crash-safety bug (an interruption rolled back every hash
+    confirmed so far, the exact thing caching was supposed to prevent) and a
+    concurrency bug (a second writer, e.g. `publish` in another terminal,
+    blocked past its busy_timeout with "database is locked")."""
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", BIG, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    find_duplicates(catalog, "nas", conn)
+
+    assert not catalog.conn.in_transaction
+
+
 def test_reindexing_a_changed_file_invalidates_its_cached_hash(nas, catalog):
     _write(nas, "a.jpg", BIG, mtime=1_000_000)
     _write(nas, "b.jpg", BIG, mtime=2_000_000)

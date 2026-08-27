@@ -106,6 +106,17 @@ def _full_hash_cached(catalog: Optional[Catalog], connector: Connector,
     computed = _full_hash(connector, row["item_id"])
     if catalog is not None:
         catalog.set_full_hash(source, row["item_id"], computed)
+        # Commits immediately, per item — unlike the "one commit after the
+        # whole batch" pattern the archive/publish actions use. Confirmation
+        # is by far the longest-running loop in the system (thousands of
+        # network reads, easily minutes), so batching this the same way
+        # would hold SQLite's write lock for the entire run: any other
+        # writer (e.g. `publish` in another terminal) blocks past its 30s
+        # busy_timeout and fails with "database is locked". It would also
+        # mean a crash before the batch commit rolls back every hash
+        # confirmed so far, defeating the whole point of caching them —
+        # exactly what happened on the very first real run of this code.
+        catalog.conn.commit()
     return computed
 
 
