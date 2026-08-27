@@ -229,17 +229,26 @@ class Catalog:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT source FROM items ORDER BY source")]
 
-    def unpublished(self, source: str, limit: Optional[int] = None) -> list[sqlite3.Row]:
+    def unpublished(self, source: str, limit: Optional[int] = None,
+                    force: bool = False) -> list[sqlite3.Row]:
         """Active, hashed items with no thumbnail/facts pushed yet, oldest-indexed first.
 
         A hash is required — that's what a thumbnail is content-addressed by —
         so an item still mid-scan (no quick_hash yet) is correctly skipped.
+
+        `force=True` also includes already-published items — for backfilling a
+        newly-added fact field (e.g. GPS) onto a library that was published
+        before that field existed, without a full reset + re-index. Thumbnails
+        stay untouched either way: they're content-addressed and unchanged, so
+        re-deriving one is wasted work regardless of `force`.
         """
         sql = (
             "SELECT * FROM items WHERE source = ? AND state = 'active' "
-            "AND quick_hash IS NOT NULL AND published_at IS NULL "
-            "ORDER BY indexed_at, item_id"
+            "AND quick_hash IS NOT NULL "
         )
+        if not force:
+            sql += "AND published_at IS NULL "
+        sql += "ORDER BY indexed_at, item_id"
         params: tuple = (source,)
         if limit is not None:
             sql += " LIMIT ?"

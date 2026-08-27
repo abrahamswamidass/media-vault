@@ -98,6 +98,7 @@ after it (and the sections further down) explain the *why* behind each one.
 | `dedup nas --debug` | Show live progress during the full-content confirmation pass. |
 | `publish nas` | Preview pushing thumbnails + metadata for unpublished items. |
 | `publish nas --commit` | Actually push them (local files without `GCS_LIVE=1`, real GCS/Firestore with it). |
+| `publish nas --force --commit` | Also republish already-published items — backfills a fact field (e.g. GPS) added after they were first published, no reset/re-index needed. |
 | `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
 | `reset --all --commit` | Same, for every source. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
@@ -205,6 +206,17 @@ It's best-effort: files with no EXIF (screenshots, some exports), no GPS block
 (most photos — screenshots, edited exports, cameras with location off), or a
 missing PyExifTool install just leave those fields empty rather than failing
 the item. `doctor` reports whether PyExifTool is available under "Tooling".
+
+**Already-published items are skipped on a normal run** — that's what makes
+re-runs cheap, but it also means a fact field added after your library was
+first published (like GPS, above) won't show up on old items just by running
+`publish` again. `--force` re-processes already-published items too, so they
+get the new field without a full `reset` + re-index. Thumbnails are
+unaffected either way: they're content-addressed and unchanged, so
+`--force` doesn't regenerate them.
+```powershell
+docker exec media-vault-container python -m mediavault.cli publish nas --force --commit
+```
 
 ### Deduplication
 

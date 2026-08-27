@@ -315,7 +315,7 @@ def cmd_publish(args) -> int:
         log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
         result = log.record(
             PublishAction(args.source, connector, catalog, blobs, facts,
-                          max_items=args.max_items).run(commit=args.commit))
+                          max_items=args.max_items, force=args.force).run(commit=args.commit))
 
         if args.json:
             _emit(result.to_dict(), True)
@@ -619,6 +619,11 @@ def build_parser() -> argparse.ArgumentParser:
     pub.add_argument("--blob-dir", help="local thumbnail folder (ignored if GCS_LIVE=1)")
     pub.add_argument("--facts-dir", help="local facts folder (ignored if GCS_LIVE=1)")
     pub.add_argument("--max-items", type=int, help="publish at most this many items")
+    pub.add_argument("--force", action="store_true",
+                     help="also republish already-published items — for backfilling a "
+                          "fact field added after they were first published (e.g. GPS), "
+                          "without a full reset + re-index. Thumbnails are untouched "
+                          "either way (content-addressed, already-there ones are skipped).")
     pub.add_argument("--commit", action="store_true",
                      help="ACTUALLY generate and push (default: preview only)")
     pub.set_defaults(_fn=cmd_publish, permanent=False)

@@ -169,13 +169,20 @@ class PublishAction(Action):
     action_type = "publish"
 
     def __init__(self, source: str, connector: Connector, catalog: Catalog,
-                 blobs: BlobStore, facts: FactsStore, *, max_items: Optional[int] = None):
+                 blobs: BlobStore, facts: FactsStore, *, max_items: Optional[int] = None,
+                 force: bool = False):
         self.source = source
         self.connector = connector
         self.catalog = catalog
         self.blobs = blobs
         self.facts = facts
         self.max_items = max_items
+        # Re-processes already-published items too — for backfilling a fact
+        # field added after they were first published (e.g. GPS), without a
+        # full reset + re-index. Thumbnails are unaffected: content-addressed
+        # and unchanged, ThumbnailAction's own idempotency check still skips
+        # re-deriving one that's already there.
+        self.force = force
         self._pending = None
 
     @property
@@ -186,19 +193,21 @@ class PublishAction(Action):
     def inputs(self) -> dict:
         return {"source": self.source, "connector": self.connector.name,
                 "blobstore": self.blobs.name, "facts": self.facts.name,
-                "max_items": self.max_items}
+                "max_items": self.max_items, "force": self.force}
 
     def validate(self) -> tuple[bool, str]:
         if self.catalog.count(self.source) == 0:
             return False, f"nothing indexed for {self.source} — run an index first"
-        self._pending = self.catalog.unpublished(self.source, limit=self.max_items)
+        self._pending = self.catalog.unpublished(self.source, limit=self.max_items,
+                                                  force=self.force)
         return True, ""
 
     def describe(self) -> str:
         n = len(self._pending or [])
         if not n:
             return f"nothing to publish in {self.source} — already up to date"
-        return (f"publish {n} item(s) from {self.source}: "
+        verb = "republish" if self.force else "publish"
+        return (f"{verb} {n} item(s) from {self.source}: "
                 f"thumbnail -> {self.blobs.name}, metadata -> {self.facts.name}")
 
     def _execute(self) -> dict:

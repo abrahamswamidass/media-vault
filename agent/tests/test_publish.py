@@ -173,6 +173,41 @@ def test_rerun_is_a_noop(nas, catalog, blobs, facts):
     assert result.status == STATUS_NOOP
 
 
+def test_force_republishes_an_already_published_item(nas, catalog, blobs, facts, fake_exiftool):
+    """Backfilling a fact field (e.g. GPS) added after first publish shouldn't
+    need a full reset + re-index — force re-processes already-published rows."""
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    fake_exiftool["result"] = [{"Composite:GPSLatitude": 1.5, "Composite:GPSLongitude": 2.5}]
+    result = PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["latitude"] == 1.5
+
+
+def test_force_does_not_regenerate_an_existing_thumbnail(nas, catalog, blobs, facts):
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    key = blob_key(catalog.get("nas", "Photos/real.jpg")["quick_hash"], "thumbs", "webp")
+    written_at = (blobs.root / key).stat().st_mtime
+
+    PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
+
+    assert (blobs.root / key).stat().st_mtime == written_at
+
+
+def test_without_force_rerun_still_ignores_already_published_items(nas, catalog, blobs, facts):
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    result = PublishAction("nas", conn, catalog, blobs, facts, force=False).run(commit=True)
+
+    assert result.status == STATUS_NOOP
+
+
 def test_thumbnail_key_is_content_addressed_not_path_addressed(nas, catalog, blobs, facts, tmp_path):
     """Two different filenames with identical bytes share one thumbnail blob."""
     (nas / "Photos" / "dup.jpg").write_bytes((nas / "Photos" / "real.jpg").read_bytes())
