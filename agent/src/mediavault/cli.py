@@ -445,6 +445,37 @@ def cmd_amazon_stage(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# drive-login
+# --------------------------------------------------------------------------- #
+def cmd_drive_login(args) -> int:
+    from .connectors.drive import SCOPES
+
+    creds_path = args.credentials or os.getenv("DRIVE_CREDENTIALS", "/secrets/drive_credentials.json")
+    token_path = args.token or os.getenv("DRIVE_TOKEN", "/secrets/drive_token.json")
+
+    if not os.path.isfile(creds_path):
+        print(f"No OAuth client file at {creds_path}.")
+        print("Google Cloud Console -> APIs & Services -> Credentials -> "
+              "Create OAuth client ID -> Desktop app -> download the JSON there.")
+        return 1
+
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
+    # host="0.0.0.0" so the callback server inside the container accepts a
+    # connection forwarded in from a published port — the browser doing the
+    # actual sign-in doesn't need to run on this machine, just reach
+    # localhost:<port> after Google redirects it there.
+    creds = flow.run_local_server(host="0.0.0.0", port=args.port, open_browser=False)
+
+    with open(token_path, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    print(f"Saved Drive token to {token_path}.")
+    print("Set DRIVE_LIVE=1 and re-run `doctor` to confirm.")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # connector passthrough
 # --------------------------------------------------------------------------- #
 def cmd_connector(args) -> int:
@@ -632,13 +663,31 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ACTUALLY stage it (default: preview only)")
     st.set_defaults(_fn=cmd_amazon_stage)
 
+    # -- drive-login --
+    dl = sub.add_parser(
+        "drive-login",
+        help="one-time interactive OAuth grant for the Drive connector",
+        description="Starts a local OAuth callback server inside the container and "
+                    "prints a URL. Open it in any browser (doesn't need to be on this "
+                    "machine — the container's port just needs to be published), sign "
+                    "in, and grant access. Saves a refreshable token so future runs "
+                    "never prompt again. Needs an OAuth Desktop-app client JSON first "
+                    "(Google Cloud Console -> APIs & Services -> Credentials).")
+    dl.add_argument("--credentials", help="OAuth client JSON path (default DRIVE_CREDENTIALS "
+                                          "or /secrets/drive_credentials.json)")
+    dl.add_argument("--token", help="where to save the token (default DRIVE_TOKEN or "
+                                    "/secrets/drive_token.json)")
+    dl.add_argument("--port", type=int, default=8080,
+                    help="local callback port — must match a published container port")
+    dl.set_defaults(_fn=cmd_drive_login)
+
     # -- connectors --
     for name in CONNECTORS:
         c = sub.add_parser(name, help=f"run one {name} connector operation")
         c.add_argument("command", choices=CONNECTOR_COMMANDS)
         c.add_argument("target", nargs="?", default="",
                        help="item id / path, or local file for upload")
-        c.add_argument("--root", help="connector root, or Drive credentials JSON")
+        c.add_argument("--root", help="connector root (NAS path, Drive folder ID, ...)")
         c.add_argument("--trash", help="NAS trash folder (default <root>/_trash)")
         c.add_argument("--prefix", default="", help="list: subpath to list under")
         c.add_argument("--limit", type=int, default=100, help="list: max items")

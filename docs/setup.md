@@ -102,6 +102,8 @@ after it (and the sections further down) explain the *why* behind each one.
 | `reset --all --commit` | Same, for every source. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
 | `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
+| `drive-login` | One-time interactive OAuth grant — see [Google Drive](#google-drive-optional). |
+| `index drive` / `dedup drive [--commit]` | Same as the NAS equivalents, once `DRIVE_LIVE=1` and signed in. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
@@ -259,12 +261,65 @@ your Fire TV. No Amazon API or credentials involved.
 
 ---
 
-## Google Drive (optional, not yet implemented)
+## Google Drive (optional)
 
-> `connectors/drive.py` is a guarded stub today — `_service()` still raises
-> `NotSupported` even with `DRIVE_LIVE=1`. A synced Drive folder mounted as a
-> local path (e.g. `G:\`) won't work either — the connector talks to the
-> Drive API, not the filesystem. Skip this until `_service()` is filled in.
+Read + soft-delete (trash) only — nothing in this project ever uploads *to*
+Drive. Duplicates are found and archived within Drive the same way as the
+NAS: `index drive`, then `dedup drive [--commit]`.
+
+### 1. Create an OAuth client
+
+**Google Cloud Console → APIs & Services → Credentials → Create OAuth client
+ID → Desktop app.** Download the JSON into `C:\mediavault\secrets` (already
+mounted at `/secrets`) as `drive_credentials.json`. Keep the OAuth consent
+screen in **Testing** mode — personal single-user use needs no Google
+verification.
+
+### 2. Publish a port for the one-time sign-in
+
+The login step below runs a local callback server *inside* the container —
+add a port mapping to the `docker run` command in step 2 of this guide (or
+recreate the container with it added):
+
+```powershell
+  -p 8080:8080 `
+```
+
+### 3. Sign in
+
+```powershell
+docker exec media-vault-container python -m mediavault.cli drive-login
+```
+
+Prints a URL — open it in **any** browser (doesn't need to be this machine),
+sign in, and grant access. After you approve, Google redirects the browser to
+`http://localhost:8080/...`, which the published port forwards straight into
+the container's waiting server. Saves a refreshable token to
+`/secrets/drive_token.json` — this step is one-time; the token renews itself
+after that.
+
+### 4. Go live
+
+Add to the `docker run` command:
+
+```powershell
+  -e DRIVE_LIVE=1 `
+```
+
+Recreate the container, then confirm with `doctor` (see "Command reference"
+above) — it reports the OAuth client and saved token under "Google Drive".
+From there, `index drive` and `dedup drive` work exactly like their NAS
+equivalents.
+
+**One difference from the NAS connector**: `--root` here is a Drive **folder
+ID**, not a path — Drive has no path concept, files are related to folders by
+ID. Omit it to scan from "My Drive" itself (the default, via Drive's own
+`root` alias).
+
+A synced Drive folder mounted as a local path (e.g. `G:\`) is a different,
+simpler option if you'd rather point the *mount-based* connector at it
+instead of using the API — but it only sees whatever your Drive desktop app
+has synced locally, not your whole Drive.
 
 ## Cloud mirror (optional)
 

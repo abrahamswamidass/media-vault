@@ -64,10 +64,10 @@ def build_connector(name: str, args):
         )
 
     if name == "drive":
-        return DriveConnector(
-            credentials_path=args.root or os.getenv("DRIVE_CREDENTIALS"),
-            permanent=args.permanent,
-        )
+        # --root overrides which Drive folder is treated as the scan root (a
+        # folder ID, not a path — Drive has no path concept). Defaults to
+        # DRIVE_ROOT_FOLDER_ID, or "root" (Drive's alias for My Drive itself).
+        return DriveConnector(root_folder_id=args.root, permanent=args.permanent)
 
     if name == "archive":
         root = args.root or os.getenv("ARCHIVE_ROOT")
