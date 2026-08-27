@@ -169,6 +169,7 @@ nav a.active {
 }
 
 .modal-media {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   /* Caps the photo to the modal's own height budget so it can never push
@@ -229,6 +230,36 @@ nav a.active {
   padding: 0.25rem 0.6rem;
 }
 
+.modal-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-nav:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.modal-nav:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.modal-prev {
+  left: 0.75rem;
+}
+
+.modal-next {
+  right: 0.75rem;
+}
+
 .modal-fullres:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -249,7 +280,10 @@ nav a.active {
   color: #eee;
 }
 
-.modal-details {
+/* [hidden] and .modal-details have equal specificity, same tie as .modal
+   above — without :not([hidden]) here, display: grid always wins and the
+   toggle button's hidden = true never actually collapses anything. */
+.modal-details:not([hidden]) {
   margin: 0.75rem 0 0;
   display: grid;
   grid-template-columns: auto 1fr;

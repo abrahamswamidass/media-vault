@@ -36,6 +36,15 @@ let loading = false;
 let jumpBeforeMtime = null;
 const groupEls = new Map(); // "2026-08" -> <section> element, so pages merge into existing months
 
+// Flat list in the exact order cards were appended — which is also visual
+// reading order (rows fill left-to-right within a grid), so "next"/"prev"
+// in the modal matches what the eye would do without it. Only covers items
+// actually rendered so far; navigating past the last one just disables
+// "next" rather than triggering a fetch, so it never surprises with a
+// network call the user didn't ask for.
+const renderedItems = [];
+let currentIndex = -1;
+
 function effectiveDate(item) {
   return item.date_taken ?? item.mtime;
 }
@@ -87,7 +96,9 @@ function renderCard(item) {
   meta.title = item.item_id;
   card.appendChild(meta);
 
-  card.addEventListener("click", () => openModal(item, img.src));
+  const index = renderedItems.length;
+  renderedItems.push(item);
+  card.addEventListener("click", () => showAt(index));
 
   getDownloadURL(ref(storage, item.thumbnail_key))
     .then((url) => { img.src = url; })
@@ -121,8 +132,13 @@ function renderDetails(item) {
   }
 }
 
-function openModal(item, thumbUrl) {
-  modal.querySelector("img").src = thumbUrl || "";
+function openModal(item) {
+  const img = modal.querySelector("img");
+  img.src = "";
+  getDownloadURL(ref(storage, item.thumbnail_key))
+    .then((url) => { img.src = url; })
+    .catch((err) => console.error(item.item_id, err));
+
   modal.querySelector(".modal-title").textContent = item.item_id;
   const camera = [item.camera_make, item.camera_model].filter(Boolean).join(" ");
   const dims = item.width && item.height ? `${item.width}×${item.height} · ` : "";
@@ -133,7 +149,22 @@ function openModal(item, thumbUrl) {
   renderDetails(item);
   modal.querySelector(".modal-details").hidden = true;
   modal.querySelector(".modal-details-toggle").textContent = "Details ▾";
+  modal.querySelector(".modal-prev").disabled = currentIndex <= 0;
+  modal.querySelector(".modal-next").disabled = currentIndex >= renderedItems.length - 1;
   modal.hidden = false;
+}
+
+function showAt(index) {
+  if (index < 0 || index >= renderedItems.length) return;
+  currentIndex = index;
+  openModal(renderedItems[index]);
+}
+
+function handleKeydown(e) {
+  if (modal.hidden) return;
+  if (e.key === "ArrowLeft") showAt(currentIndex - 1);
+  else if (e.key === "ArrowRight") showAt(currentIndex + 1);
+  else if (e.key === "Escape") modal.hidden = true;
 }
 
 async function loadPage() {
@@ -202,6 +233,8 @@ function resetAndLoad() {
   exhausted = false;
   groupEls.clear();
   groupsEl.innerHTML = "";
+  renderedItems.length = 0;
+  currentIndex = -1;
   loadMoreBtn.hidden = false;
   loadPage().catch((err) => {
     statusEl.textContent = `Failed to load: ${err.message}`;
@@ -222,7 +255,9 @@ export function mount(container) {
       <div class="modal-content">
         <button class="modal-close">&times;</button>
         <div class="modal-media">
+          <button class="modal-nav modal-prev" type="button" aria-label="Previous">&lsaquo;</button>
           <img alt="" />
+          <button class="modal-nav modal-next" type="button" aria-label="Next">&rsaquo;</button>
         </div>
         <div class="modal-info">
           <p class="modal-title"></p>
@@ -251,6 +286,14 @@ export function mount(container) {
     details.hidden = !details.hidden;
     modal.querySelector(".modal-details-toggle").textContent = details.hidden ? "Details ▾" : "Details ▴";
   });
+  modal.querySelector(".modal-prev").addEventListener("click", () => showAt(currentIndex - 1));
+  modal.querySelector(".modal-next").addEventListener("click", () => showAt(currentIndex + 1));
+  // Attached to document (not the modal) since arrow keys should work
+  // regardless of what currently has focus. Removed in unmount() — a
+  // document-level listener outlives this view's own DOM otherwise, and
+  // remounting Browse (nav away and back) would stack a duplicate on top of
+  // it instead of replacing it, each one firing on every keypress after that.
+  document.addEventListener("keydown", handleKeydown);
   yearSelect.addEventListener("change", () => {
     const year = yearSelect.value;
     // "<= end of that year" (Dec 31, 23:59:59 local) so the jump lands on
@@ -265,5 +308,6 @@ export function mount(container) {
 }
 
 export function unmount() {
+  document.removeEventListener("keydown", handleKeydown);
   root.innerHTML = "";
 }
