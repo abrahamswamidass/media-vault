@@ -81,32 +81,36 @@ docker exec media-vault-container python -m mediavault.cli doctor
 
 Green means ready. Anything red or `!` prints the exact fix beneath it.
 
-## Daily use
+## Command reference
 
 Every command below runs the same way — `docker exec media-vault-container
-python -m mediavault.cli <command>`:
+python -m mediavault.cli <command>`. This table is the lookup; the prose
+after it (and the sections further down) explain the *why* behind each one.
 
-```powershell
-docker exec media-vault-container python -m mediavault.cli doctor
-docker exec media-vault-container python -m mediavault.cli index nas
-docker exec media-vault-container python -m mediavault.cli stats
-docker exec media-vault-container python -m mediavault.cli dedup nas
-docker exec media-vault-container python -m mediavault.cli dedup nas --commit
-docker exec media-vault-container python -m mediavault.cli publish nas
-docker exec media-vault-container python -m mediavault.cli publish nas --commit
-```
+| Command | What it does |
+|---|---|
+| `doctor` | Preflight check — what's configured, what isn't. |
+| `index nas` | Resumable walk into the catalog. Add `--debug` for live per-file/per-directory progress. |
+| `stats` | Summary of what's in the catalog. |
+| `dedup nas` | Preview duplicate groups. |
+| `dedup nas --commit` | Archive every duplicate found (see [Deduplication](#deduplication) for `--max-groups` to do this in batches). |
+| `dedup nas --by-folder [--depth N]` | Summarize reclaimable space by folder instead of listing every group. Always read-only. |
+| `dedup nas --debug` | Show live progress during the full-content confirmation pass. |
+| `publish nas` | Preview pushing thumbnails + metadata for unpublished items. |
+| `publish nas --commit` | Actually push them (local files without `GCS_LIVE=1`, real GCS/Firestore with it). |
+| `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
+| `reset --all --commit` | Same, for every source. |
+| `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
+| `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
 
 **A large directory (hundreds/thousands of files — Google Photos exports are
 notorious for this) can take minutes with zero visible output**, since
-progress only prints once a whole directory finishes. Add `--debug` to see
-what it's actually doing right now, file by file:
-```powershell
-docker exec media-vault-container python -m mediavault.cli index nas --debug
-```
-Without this, a big directory and a genuinely stuck scan look identical.
+progress only prints once a whole directory finishes. `index --debug` (see
+the table above) shows what it's actually doing right now, file by file —
+without it, a big directory and a genuinely stuck scan look identical.
 
 **Resuming after an interruption has its own silent phase, even with
 `--debug`**: fast-forwarding to the saved cursor re-walks (and re-lists)
@@ -211,6 +215,13 @@ actually archives.** On a library with thousands of groups, `dedup nas
 archive in batches instead, use `--max-groups`:
 ```powershell
 docker exec media-vault-container python -m mediavault.cli dedup nas --max-groups 500 --commit
+```
+
+**Confirmation (the full-content read step above) is silent by default on a
+large library** — the same silent-but-working problem `index --debug` solved
+for scanning. Add `--debug` to see each candidate as it's confirmed:
+```powershell
+docker exec media-vault-container python -m mediavault.cli dedup nas --debug
 ```
 
 **On a large library, `dedup nas` listing every group one at a time isn't a
