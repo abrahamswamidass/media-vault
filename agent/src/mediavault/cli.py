@@ -462,11 +462,14 @@ def cmd_drive_login(args) -> int:
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
-    # host="0.0.0.0" so the callback server inside the container accepts a
-    # connection forwarded in from a published port — the browser doing the
+    # bind_addr="0.0.0.0" so the callback server inside the container accepts
+    # a connection forwarded in from a published port — the browser doing the
     # actual sign-in doesn't need to run on this machine, just reach
-    # localhost:<port> after Google redirects it there.
-    creds = flow.run_local_server(host="0.0.0.0", port=args.port, open_browser=False)
+    # localhost:<port> after Google redirects it there. host stays "localhost"
+    # (the default) since that's what ends up in the redirect_uri Google sees
+    # — 0.0.0.0 there gets rejected with "Access blocked: Authorization Error
+    # / Error 400: invalid_request", since it isn't a real loopback address.
+    creds = flow.run_local_server(bind_addr="0.0.0.0", port=args.port, open_browser=False)
 
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
