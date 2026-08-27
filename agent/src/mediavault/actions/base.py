@@ -106,10 +106,19 @@ class Action(ABC):
     def run(self, commit: bool = False) -> ActionResult:
         """Validate, then either preview (default) or perform.
 
-        This is the ONLY way to invoke an action. Dry-run is the default so a
-        caller that forgets the flag previews instead of mutating.
+        This is the ONLY way to invoke an action, and the promise is that it
+        always returns an ActionResult rather than raising — a caller looping
+        over many actions (dedup archiving hundreds of groups, say) shouldn't
+        have one bad one crash the whole batch. That promise used to only
+        cover _execute(); validate() itself can just as easily hit a live
+        connector (a staleness check, a fresh stat()) and fail the same way.
         """
-        is_safe, reason = self.validate()
+        try:
+            is_safe, reason = self.validate()
+        except Exception as e:
+            return self._result(STATUS_FAILED, committed=False,
+                                detail=f"validation crashed: {type(e).__name__}: {e}",
+                                error=str(e))
         if not is_safe:
             return self._result(STATUS_FAILED, committed=False,
                                 detail=f"validation failed: {reason}", error=reason)

@@ -378,3 +378,53 @@ def test_folder_breakdown_only_counts_archivable_groups(nas, catalog):
 
     groups = find_duplicates(catalog, "nas", conn)
     assert folder_breakdown(groups) == []
+
+
+# --------------------------------------------------------------------------- #
+# Confirmation survives a connector's own non-OSError transient failures
+# --------------------------------------------------------------------------- #
+class _TransientConnectorError(Exception):
+    """Stand-in for a connector's own transient-connection exception type
+    that isn't an OSError subclass — smbprotocol's SMBConnectionClosed and
+    SMBAuthenticationError are exactly this in practice."""
+
+
+class _FlakyReadConnector:
+    """Wraps a real connector but makes read() raise a non-OSError exception
+    for one item_id, simulating a connection drop that outlasted the
+    connector's own retry/reconnect attempts."""
+
+    def __init__(self, inner, fail_item_id):
+        self._inner = inner
+        self._fail_item_id = fail_item_id
+        self.name = inner.name
+
+    def read(self, item_id, nbytes=0):
+        if item_id == self._fail_item_id:
+            raise _TransientConnectorError("connection dropped")
+        return self._inner.read(item_id, nbytes)
+
+    def stat(self, item_id):
+        return self._inner.stat(item_id)
+
+    def list(self, prefix="", limit=100):
+        return self._inner.list(prefix, limit)
+
+
+def test_confirm_survives_a_non_oserror_read_failure(nas, catalog):
+    """Regression: a connector's own transient exception type (not an
+    OSError subclass) used to propagate straight out of _confirm(), crashing
+    the entire dedup run instead of just marking that one group unconfirmed
+    — a real risk given confirmation full-hashes every candidate over 128KB,
+    potentially thousands of them, over the same connection that can drop."""
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", BIG, mtime=2_000_000)
+    real_conn = _indexed(nas, catalog)
+    flaky = _FlakyReadConnector(real_conn, fail_item_id="a.jpg")  # the keeper
+
+    groups = find_duplicates(catalog, "nas", flaky)  # must not raise
+
+    assert len(groups) == 1
+    assert groups[0].confirmed is False
+    assert "could not read keeper" in groups[0].confirm_note
+    assert not groups[0].safe_to_archive

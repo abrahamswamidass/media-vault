@@ -124,6 +124,16 @@ see a crash instead of a brief pause, it's a persistent connectivity problem
 worth investigating on the NAS/network side, not something a re-run alone
 will fix.
 
+**`dedup`'s confirmation pass is hardened the same way.** Every duplicate
+candidate over 128 KB gets a full-content read to confirm it (see
+"Deduplication" below) — on a large library that's thousands of reads over
+the same connection that can drop. A connector's own connection-drop
+exception used to slip past this step's narrower error handling and crash
+the whole `dedup` run (discarding all the confirmation work already done,
+since it isn't checkpointed the way indexing is); now it's treated as "can't
+confirm this one, leave it alone" instead — safe by construction, since an
+unconfirmed group never archives.
+
 **The skip phase itself is also much faster now.** It used to fetch full
 metadata (type, size, modified time) for every file with 3 separate network
 calls each — wasted work for files, since the skip phase only needs to know

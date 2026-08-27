@@ -145,10 +145,18 @@ def _confirm(group: DuplicateGroup, connector: Connector) -> DuplicateGroup:
     unlikely for photos, entirely plausible for video and documents with fixed
     headers and footers. This is the check that stands between that case and a
     deleted file.
+
+    Catches any exception, not just the obvious file-I/O ones. A connector's
+    own transient-connection errors (e.g. SMBConnectionClosed, or the SPNEGO
+    auth error smbclient's own reconnect can surface) aren't OSError subclasses,
+    so a narrower catch here missed them entirely — by the time one reaches
+    this function, the connector has already exhausted its own retry/reconnect
+    attempts, so treating it as "can't confirm this one, move on" is the
+    correct, safe response, not a crash of the whole confirmation pass.
     """
     try:
         keeper_hash = _full_hash(connector, group.keeper["item_id"])
-    except (FileNotFoundError, OSError, ValueError) as e:
+    except Exception as e:
         group.confirmed = False
         group.confirm_note = f"could not read keeper: {e}"
         return group
@@ -160,7 +168,7 @@ def _confirm(group: DuplicateGroup, connector: Connector) -> DuplicateGroup:
                 identical.append(row)
             else:
                 differing.append(row)
-        except (FileNotFoundError, OSError, ValueError) as e:
+        except Exception as e:
             differing.append(row)
             group.confirm_note = f"could not read {row['item_id']}: {e}"
 

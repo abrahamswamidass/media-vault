@@ -12,6 +12,7 @@ from mediavault.actions import (
     ActionLog, CopyAction, DeleteAction, MoveAction,
     STATUS_FAILED, STATUS_NOOP, STATUS_OK,
 )
+from mediavault.actions.base import Action
 from mediavault.actions.derive import FetchFullResAction
 from mediavault.connectors.nas import NASConnector
 from mediavault.blobstore import LocalBlobStore, blob_key
@@ -157,3 +158,42 @@ def test_summary_counts_by_type_and_status(nas, staging, tmp_path):
     assert summary["by_type"] == {"delete": 2, "copy": 1}
     assert summary["by_status"] == {"ok": 2, "failed": 1}
     assert len(log.failures()) == 1
+
+
+# --------------------------------------------------------------------------- #
+# run() must always return an ActionResult, never raise
+# --------------------------------------------------------------------------- #
+class _CrashesOnValidate(Action):
+    """A minimal Action whose validate() blows up — stands in for a live
+    connector check (a staleness stat(), say) hitting a dropped connection."""
+    action_type = "test_crash"
+
+    @property
+    def target_id(self):
+        return "x"
+
+    @property
+    def inputs(self):
+        return {}
+
+    def validate(self):
+        raise RuntimeError("boom")
+
+    def describe(self):
+        return "would never get here"
+
+    def _execute(self):
+        return {}
+
+
+def test_run_never_raises_even_if_validate_crashes():
+    """Regression: run()'s docstring promises to always return an
+    ActionResult — only _execute() was ever guarded for that. A crash inside
+    validate() (e.g. ArchiveDuplicatesAction's staleness stat() hitting a
+    dropped SMB session) used to propagate straight out of run(), which would
+    take down any caller looping over many actions (dedup archiving hundreds
+    of groups in one --commit run, say) instead of just failing that one."""
+    result = _CrashesOnValidate().run(commit=True)
+
+    assert result.status == STATUS_FAILED
+    assert "boom" in result.detail
