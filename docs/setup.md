@@ -199,11 +199,12 @@ is configured, to see what it would do. With `GCS_LIVE=1`, both go to the real
 Cloud Storage bucket and Firestore (see "Cloud mirror" below).
 
 Each item also gets EXIF pulled from a small header read (dimensions, camera
-make/model, real capture date) via the `exiftool`/PyExifTool already baked
-into the image — no extra setup needed. It's best-effort: files with no EXIF
-(screenshots, some exports) or a missing PyExifTool install just leave those
-fields empty rather than failing the item. `doctor` reports whether PyExifTool
-is available under "Tooling".
+make/model, real capture date, GPS coordinates where present) via the
+`exiftool`/PyExifTool already baked into the image — no extra setup needed.
+It's best-effort: files with no EXIF (screenshots, some exports), no GPS block
+(most photos — screenshots, edited exports, cameras with location off), or a
+missing PyExifTool install just leave those fields empty rather than failing
+the item. `doctor` reports whether PyExifTool is available under "Tooling".
 
 ### Deduplication
 
@@ -375,7 +376,11 @@ pushes real thumbnails to the bucket and metadata documents to Firestore's
 
 `web/` is a minimal static page — no build step, single-user Google
 sign-in — that reads the `items` Firestore collection and shows a thumbnail
-grid. It's an MVP placeholder, not the eventual React app. Access is gated
+grid. It's an MVP placeholder, not the eventual React app. A second tab,
+**Map**, pins every geotagged item on a Leaflet/OpenStreetMap map — no API
+key, no cost, loaded from a CDN only when that tab is opened. Most photos
+have no GPS at all (screenshots, edited exports, location off), so an empty
+or sparse map is normal, not a sign anything's broken. Access is gated
 server-side by `firestore.rules` and `storage.rules`, both hardcoded to one
 owner email — not by hiding the URL. GCS's `allUsers` IAM grant explicitly
 cannot be scoped to a prefix (Google rejects conditions on public principals),

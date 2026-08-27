@@ -7,10 +7,11 @@ import {
 import { auth } from "./firebase.js";
 import { OWNER_EMAIL } from "./firebase-config.js";
 import * as browseView from "./views/browse.js";
+import * as mapView from "./views/map.js";
 import * as duplicatesView from "./views/duplicates.js";
 import * as amazonView from "./views/amazon.js";
 
-const VIEWS = { browse: browseView, duplicates: duplicatesView, amazon: amazonView };
+const VIEWS = { browse: browseView, map: mapView, duplicates: duplicatesView, amazon: amazonView };
 const DEFAULT_VIEW = "browse";
 
 const statusEl = document.getElementById("status");

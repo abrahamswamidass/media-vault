@@ -240,6 +240,8 @@ class PublishAction(Action):
                     "date_taken": exif.get("date_taken"),
                     "camera_make": exif.get("camera_make"),
                     "camera_model": exif.get("camera_model"),
+                    "latitude": exif.get("latitude"),
+                    "longitude": exif.get("longitude"),
                 })
                 self.catalog.mark_published(self.source, item_id)
                 published.append(item_id)

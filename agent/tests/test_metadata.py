@@ -39,6 +39,7 @@ def test_extract_maps_known_fields(fake_exiftool):
         "File:ImageWidth": 6000, "File:ImageHeight": 4000,
         "EXIF:DateTimeOriginal": "2026:01:15 10:30:00",
         "EXIF:Make": "Canon", "EXIF:Model": "EOS R5",
+        "Composite:GPSLatitude": 37.7749, "Composite:GPSLongitude": -122.4194,
     }]
 
     result = metadata.extract(b"fake bytes", suffix=".CR2")
@@ -47,6 +48,8 @@ def test_extract_maps_known_fields(fake_exiftool):
     assert result["height"] == 4000
     assert result["camera_make"] == "Canon"
     assert result["camera_model"] == "EOS R5"
+    assert result["latitude"] == 37.7749
+    assert result["longitude"] == -122.4194
     expected = datetime.strptime("2026:01:15 10:30:00", "%Y:%m:%d %H:%M:%S").timestamp()
     assert result["date_taken"] == expected
 
@@ -60,6 +63,7 @@ def test_extract_handles_missing_fields(fake_exiftool):
     assert result == {
         "width": None, "height": None, "date_taken": None,
         "camera_make": None, "camera_model": None,
+        "latitude": None, "longitude": None,
     }
 
 

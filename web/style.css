@@ -292,6 +292,32 @@ nav a.active {
   background: #222;
 }
 
+.map-el {
+  height: 70vh;
+  min-height: 20rem;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1c1c1c;
+}
+
+.map-popup {
+  width: 160px;
+}
+
+.map-popup img {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  margin-bottom: 0.35rem;
+  background: #222;
+}
+
+.map-popup-name {
+  font-size: 0.7rem;
+  color: #333;
+  word-break: break-all;
+}
+
 .card .meta {
   padding: 0.4rem 0.5rem;
   font-size: 0.75rem;

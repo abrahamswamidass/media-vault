@@ -122,6 +122,35 @@ def test_commit_extracts_and_stores_exif(nas, catalog, blobs, facts, fake_exifto
     assert "EOS R5" in fact_file.read_text()
 
 
+def test_commit_extracts_and_stores_gps(nas, catalog, blobs, facts, fake_exiftool):
+    fake_exiftool["result"] = [{
+        "Composite:GPSLatitude": 37.7749, "Composite:GPSLongitude": -122.4194,
+    }]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["latitude"] == 37.7749
+    assert row["longitude"] == -122.4194
+
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert "37.7749" in fact_file.read_text()
+
+
+def test_missing_gps_leaves_coordinates_null_not_zero(nas, catalog, blobs, facts, fake_exiftool):
+    """0,0 is a real place (off the coast of West Africa) — an absent GPS
+    block must stay NULL, never silently become that valid-looking pair."""
+    fake_exiftool["result"] = [{"EXIF:Make": "Canon"}]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["latitude"] is None
+    assert row["longitude"] is None
+
+
 def test_missing_exif_tool_does_not_block_publish(nas, catalog, blobs, facts, monkeypatch):
     """PyExifTool not being installed must degrade gracefully, not fail the item."""
     monkeypatch.setitem(sys.modules, "exiftool", None)

@@ -42,6 +42,13 @@
     },
     "width": { "type": ["integer", "null"], "minimum": 0 },
     "height": { "type": ["integer", "null"], "minimum": 0 },
+    "latitude": {
+      "type": ["number", "null"], "minimum": -90, "maximum": 90,
+      "description": "From EXIF GPS, where present. Most photos have none — screenshots, edited exports, cameras with GPS off."
+    },
+    "longitude": {
+      "type": ["number", "null"], "minimum": -180, "maximum": 180
+    },
     "indexed_at": {
       "type": "string",
       "format": "date-time",

@@ -22,8 +22,14 @@ from typing import Optional
 #: the date part — a long-standing EXIF spec quirk).
 _EXIF_DATE_FMT = "%Y:%m:%d %H:%M:%S"
 
+#: Composite:GPS* are exiftool's own signed-decimal-degrees conversion of the
+#: raw EXIF GPS block (which stores degrees/minutes/seconds plus a separate
+#: N/S/E/W ref tag) — asking for these directly skips reimplementing that
+#: conversion here. Absent on the large majority of photos (most cameras and
+#: re-saved/edited exports carry no GPS block at all), same as camera make/model.
 _TAGS = ["File:ImageWidth", "File:ImageHeight",
-         "EXIF:DateTimeOriginal", "EXIF:Make", "EXIF:Model"]
+         "EXIF:DateTimeOriginal", "EXIF:Make", "EXIF:Model",
+         "Composite:GPSLatitude", "Composite:GPSLongitude"]
 
 
 class MetadataUnavailable(RuntimeError):
@@ -82,4 +88,6 @@ def extract(data: bytes, suffix: str = "") -> dict:
         "date_taken": _parse_date(raw.get("EXIF:DateTimeOriginal")),
         "camera_make": raw.get("EXIF:Make"),
         "camera_model": raw.get("EXIF:Model"),
+        "latitude": raw.get("Composite:GPSLatitude"),
+        "longitude": raw.get("Composite:GPSLongitude"),
     }
