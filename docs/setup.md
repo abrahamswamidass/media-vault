@@ -103,7 +103,9 @@ after it (and the sections further down) explain the *why* behind each one.
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
 | `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
 | `drive-login` | One-time interactive OAuth grant — see [Google Drive](#google-drive-optional). |
-| `index drive` / `dedup drive [--commit]` | Same as the NAS equivalents, once `DRIVE_LIVE=1` and signed in. |
+| `index drive` | Resumable walk into the catalog, same as `index nas`. Needs `DRIVE_LIVE=1` and a saved token. |
+| `dedup drive [--commit]` | Preview / archive Drive duplicates — same flags as `dedup nas` (`--by-folder`, `--debug`, `--max-groups`, ...). |
+| `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
