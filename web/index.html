@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- viewport-fit=cover lets content span under the notch/status bar on
+       iOS — required for env(safe-area-inset-*) below to resolve to a real
+       value instead of 0. Without it, the full-bleed mobile modal has no
+       way to know how much to inset itself. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Media Vault</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="icons/favicon.png" />
