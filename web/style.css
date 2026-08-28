@@ -158,23 +158,43 @@ nav a.active {
 /* One column at every size — a native-app-style photo viewer (image full
    width, a row of icon buttons on top, details as a sheet underneath,
    toggled by tapping the photo) rather than a desktop-only two-column form
-   that only worked with room to spare. */
+   that only worked with room to spare.
+
+   The topbar is in normal document flow, not floated over the photo —
+   floating it required guessing exactly how much to inset it below the
+   iOS status bar/notch via env(safe-area-inset-top), and that guess was
+   wrong in both directions in testing (clipped the buttons, then
+   overcorrected into a dead gap above the photo). A row above the image
+   needs no such guess and can't clip or leave a gap on any device. */
 .modal-content {
   position: relative;
   background: #1c1c1c;
   border-radius: 8px;
-  padding: 3.25rem 1rem 1rem;
+  padding: 1rem;
   max-width: 40rem;
   width: 100%;
   max-height: calc(100vh - 3rem);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  flex-shrink: 0;
 }
 
 /* Edge-to-edge on a phone — the photo itself should reach the screen's
    sides, not sit in a card with its own margin/rounded corners. Text below
    the image keeps its own inset (.modal-stage-status, .modal-details)
    since unpadded body text flush against the screen edge is a readability
-   problem the photo doesn't have. */
+   problem the photo doesn't have. The topbar gets a safe-area-aware top
+   inset here (rather than the whole modal, as before) so it clears the
+   status bar/notch without having to also guess how far to push the image
+   down to match — flow layout handles that on its own. */
 @media (max-width: 30rem) {
   .modal {
     padding: 0;
@@ -184,12 +204,11 @@ nav a.active {
     height: 100%;
     max-height: 100%;
     border-radius: 0;
-    /* The card's own 1.5rem outer margin used to be what kept the topbar
-       clear of the iOS status bar/notch — gone now that the modal is
-       flush with the screen edge, so this has to do that job instead.
-       env(safe-area-inset-top) needs viewport-fit=cover on the <meta
-       viewport> tag to resolve to anything but 0. */
-    padding-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+    padding: 0 0 1rem;
+  }
+  .modal-topbar {
+    padding: calc(0.5rem + env(safe-area-inset-top, 0px)) 0.5rem 0;
+    margin-bottom: 0.75rem;
   }
   .modal-content img {
     border-radius: 0;
@@ -198,20 +217,6 @@ nav a.active {
   .modal-details {
     padding: 0 1rem;
   }
-  .modal-topbar {
-    top: calc(0.5rem + env(safe-area-inset-top, 0px));
-  }
-}
-
-.modal-topbar {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  right: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  z-index: 2;
 }
 
 .modal-topbar-spacer {
