@@ -200,6 +200,28 @@ function handleKeydown(e) {
   else if (e.key === "Escape") modal.hidden = true;
 }
 
+// Swipe left/right on the photo — the expected way to move between photos
+// on a phone, buttons/arrow keys are the fallback for anyone not touching
+// the screen. Only reacts to a mostly-horizontal drag past a real threshold
+// (50px, and at least 1.5x more horizontal than vertical movement) so a
+// slightly-diagonal scroll attempt or an accidental tap-and-drag doesn't
+// misfire as a page change.
+let touchStartX = 0;
+let touchStartY = 0;
+
+function handleTouchStart(e) {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}
+
+function handleTouchEnd(e) {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    showAt(currentIndex + (dx < 0 ? 1 : -1));
+  }
+}
+
 async function loadPage() {
   if (loading || exhausted) return;
   loading = true;
@@ -325,6 +347,8 @@ export function mount(container) {
     if (e.target === modal) modal.hidden = true;
   });
   modal.querySelector("img").addEventListener("click", toggleDetails);
+  modal.querySelector(".modal-media").addEventListener("touchstart", handleTouchStart, { passive: true });
+  modal.querySelector(".modal-media").addEventListener("touchend", handleTouchEnd, { passive: true });
   modal.querySelector(".modal-menu-toggle").addEventListener("click", (e) => {
     e.stopPropagation(); // don't let the modal-level listener above immediately re-close it
     modal.querySelector(".modal-menu").hidden = !modal.querySelector(".modal-menu").hidden;
