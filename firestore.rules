@@ -1,8 +1,9 @@
 rules_version = '2';
 
-// Single-user gate: only the owner's Google account can read. Enforced here
+// Allowlist gate: only these Google accounts can read. Enforced here
 // server-side — the client UI hiding the sign-in button is not what makes
-// this private, this rule is.
+// this private, this rule is. Kept in sync by hand with ALLOWED_EMAILS in
+// web/firebase-config.js.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /items/{itemId} {
@@ -10,7 +11,7 @@ service cloud.firestore {
       // client, which bypasses these rules entirely regardless of what's
       // allowed here.
       allow read: if request.auth != null
-                  && request.auth.token.email == "winfredbe@gmail.com";
+                  && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
       allow write: if false;
     }
 
@@ -21,10 +22,10 @@ service cloud.firestore {
     // the client, only read (to show its eventual result).
     match /intents/{intentId} {
       allow read: if request.auth != null
-                  && request.auth.token.email == "winfredbe@gmail.com";
+                  && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
 
       allow create: if request.auth != null
-                    && request.auth.token.email == "winfredbe@gmail.com"
+                    && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"]
                     && request.resource.data.keys().hasOnly(
                          ["id", "type", "item_id", "params", "status", "created_at"])
                     && request.resource.data.id == intentId

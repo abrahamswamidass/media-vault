@@ -24,7 +24,8 @@ export const FIRESTORE_DATABASE = "media-vault-store";
 // gcp-arch-340414.firebasestorage.app (that's the POC's default bucket).
 export const GCS_BUCKET = "mymediavault";
 
-// The only Google account allowed to sign in. Client-side check here is only
-// for UI state (which screen to show) — the real enforcement is the matching
-// check in firestore.rules and storage.rules, which run server-side.
-export const OWNER_EMAIL = "winfredbe@gmail.com";
+// The only Google accounts allowed to sign in. Client-side check here is
+// only for UI state (which screen to show) — the real enforcement is the
+// matching allowlist in firestore.rules and storage.rules, which run
+// server-side and must be kept in sync with this list by hand.
+export const ALLOWED_EMAILS = ["winfredbe@gmail.com", "percial@gmail.com"];

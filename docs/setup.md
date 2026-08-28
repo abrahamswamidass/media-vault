@@ -399,17 +399,18 @@ pushes real thumbnails to the bucket and metadata documents to Firestore's
 
 ## Web viewer
 
-`web/` is a minimal static page — no build step, single-user Google
-sign-in — that reads the `items` Firestore collection and shows a thumbnail
-grid. It's an MVP placeholder, not the eventual React app. A second tab,
-**Map**, pins every geotagged item on a Leaflet/OpenStreetMap map — no API
-key, no cost, loaded from a CDN only when that tab is opened. Most photos
-have no GPS at all (screenshots, edited exports, location off), so an empty
-or sparse map is normal, not a sign anything's broken. Access is gated
-server-side by `firestore.rules` and `storage.rules`, both hardcoded to one
-owner email — not by hiding the URL. GCS's `allUsers` IAM grant explicitly
-cannot be scoped to a prefix (Google rejects conditions on public principals),
-so this is the actual private-by-default path, not a workaround.
+`web/` is a minimal static page — no build step, Google sign-in gated to a
+small hardcoded allowlist — that reads the `items` Firestore collection and
+shows a thumbnail grid. It's an MVP placeholder, not the eventual React app.
+A second tab, **Map**, pins every geotagged item on a Leaflet/OpenStreetMap
+map — no API key, no cost, loaded from a CDN only when that tab is opened.
+Most photos have no GPS at all (screenshots, edited exports, location off),
+so an empty or sparse map is normal, not a sign anything's broken. Access is
+gated server-side by `firestore.rules` and `storage.rules`, both hardcoded
+to the same allowlist of emails — not by hiding the URL. GCS's `allUsers`
+IAM grant explicitly cannot be scoped to a prefix (Google rejects conditions
+on public principals), so this is the actual private-by-default path, not a
+workaround.
 
 **Staging a photo for Amazon** works from Browse or Map's own photo view
 (click a photo → "Stage for Amazon"). That button only *writes a request* —
@@ -457,9 +458,11 @@ select the agent's bucket there instead.
   the agent's bucket (from step 3) → paste in `storage.rules` from the repo
   root → **Publish**.
 
-Both files already have `winfredbe@gmail.com` hardcoded as the only allowed
-reader — edit that line in both files first if it should be a different
-account.
+Both files already have an allowlist (`winfredbe@gmail.com`,
+`percial@gmail.com`) hardcoded — edit the `in [...]` line in both files to
+add, remove, or replace accounts. Keep `web/firebase-config.js`'s
+`ALLOWED_EMAILS` (step 5) in sync by hand — nothing enforces the two lists
+matching, they just both need to.
 
 **If you set this up before Amazon staging existed**, re-paste
 `firestore.rules` — it now also covers the `intents/` collection ("Stage for
@@ -485,13 +488,13 @@ export const firebaseConfig = {
 };
 export const FIRESTORE_DATABASE = "your-database-name"; // e.g. media-vault-store
 export const GCS_BUCKET = "your-bucket-name";
-export const OWNER_EMAIL = "winfredbe@gmail.com";
+export const ALLOWED_EMAILS = ["winfredbe@gmail.com", "percial@gmail.com"];
 ```
 
 None of this is secret — Firebase web API keys are safe to commit; access is
 controlled by the security rules in step 4, not by hiding this file.
-`OWNER_EMAIL` here only controls which screen the page shows (signed-in vs.
-"not authorized") — it is not what makes this private.
+`ALLOWED_EMAILS` here only controls which screen the page shows (signed-in
+vs. "not authorized") — it is not what makes this private.
 
 ### 6. Preview locally (optional but fast)
 
@@ -500,11 +503,11 @@ cd web
 python -m http.server 8000
 ```
 
-Open `http://localhost:8000`, click **Sign in with Google**, and use the
-`winfredbe@gmail.com` account — if steps 1–5 are right, you'll see the
-thumbnail grid, no deploy needed yet. Any other Google account gets a clean
-"not authorized" message, and the security rules reject it either way even if
-the client-side check were somehow bypassed.
+Open `http://localhost:8000`, click **Sign in with Google**, and use one of
+the allowlisted accounts — if steps 1–5 are right, you'll see the thumbnail
+grid, no deploy needed yet. Any other Google account gets a clean "not
+authorized" message, and the security rules reject it either way even if the
+client-side check were somehow bypassed.
 
 ### 7. Deploy
 

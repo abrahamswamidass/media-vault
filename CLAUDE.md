@@ -40,9 +40,9 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  functional; duplicates is a stub — see its file comment for
                  what's blocking it. Picking a photo to stage happens in
                  Browse/Map's own UI (intents.js), not in the Amazon tab
-                 itself. Single-user Google sign-in; access is gated
-                 server-side by firestore.rules/storage.rules (owner email
-                 hardcoded there),
+                 itself. Google sign-in gated to a small hardcoded allowlist
+                 (family/household accounts, not the general public);
+                 enforced server-side by firestore.rules/storage.rules,
                  not by hiding the URL. See docs/setup.md's "Web viewer".
 shared/contracts/ JSON Schema both modules validate against. Change here first.
 docs/            architecture.html, setup.md, command-catalog.html

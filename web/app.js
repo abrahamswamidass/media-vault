@@ -5,7 +5,7 @@ import {
   GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { auth } from "./firebase.js";
-import { OWNER_EMAIL } from "./firebase-config.js";
+import { ALLOWED_EMAILS } from "./firebase-config.js";
 import * as browseView from "./views/browse.js";
 import * as mapView from "./views/map.js";
 import * as duplicatesView from "./views/duplicates.js";
@@ -50,7 +50,7 @@ function route() {
 window.addEventListener("hashchange", route);
 
 onAuthStateChanged(auth, (user) => {
-  const signedIn = !!user && user.email === OWNER_EMAIL;
+  const signedIn = !!user && ALLOWED_EMAILS.includes(user.email);
 
   signinEl.hidden = signedIn;
   navEl.hidden = !signedIn;
