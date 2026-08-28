@@ -155,80 +155,58 @@ nav a.active {
   display: flex;
 }
 
+/* One column at every size — a native-app-style photo viewer (image full
+   width, a row of icon buttons on top, details as a sheet underneath,
+   toggled by tapping the photo) rather than a desktop-only two-column form
+   that only worked with room to spare. */
 .modal-content {
   position: relative;
   background: #1c1c1c;
   border-radius: 8px;
-  padding: 1.5rem;
-  max-width: 56rem;
+  padding: 3.25rem 1rem 1rem;
+  max-width: 40rem;
   width: 100%;
   max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+}
+
+.modal-topbar {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
   display: flex;
-  gap: 1.5rem;
-  align-items: flex-start;
+  align-items: center;
+  gap: 0.4rem;
+  z-index: 2;
+}
+
+.modal-topbar-spacer {
+  flex: 1;
 }
 
 .modal-media {
   position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  /* Caps the photo to the modal's own height budget so it can never push
-     the info column (or itself) past the viewport — the image scales
-     down, never the layout. */
-  max-height: calc(100vh - 6rem);
 }
 
 .modal-content img {
   display: block;
   width: 100%;
-  max-height: calc(100vh - 6rem);
+  max-height: calc(100vh - 9rem);
   border-radius: 6px;
   object-fit: contain;
-}
-
-.modal-info {
-  flex: 0 0 16rem;
-  max-height: calc(100vh - 6rem);
-  overflow-y: auto;
-}
-
-/* Narrow viewports: stack instead of side-by-side, same as before this
-   layout existed — the two-column form only makes sense with room to
-   actually show both at once. */
-@media (max-width: 40rem) {
-  .modal-content {
-    flex-direction: column;
-    max-width: 32rem;
-    overflow-y: auto;
-  }
-  .modal-info {
-    flex-basis: auto;
-    max-height: none;
-    overflow-y: visible;
-  }
-  .modal-content img {
-    margin-bottom: 1rem;
-  }
-}
-
-.modal-close {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  padding: 0.25rem 0.6rem;
+  cursor: pointer;
 }
 
 .modal-nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
   border-radius: 50%;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   line-height: 1;
   padding: 0;
   background: rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
 }
 
 .modal-nav:hover {
@@ -240,48 +218,12 @@ nav a.active {
   cursor: not-allowed;
 }
 
-.modal-prev {
-  left: 0.75rem;
-}
-
-.modal-next {
-  right: 0.75rem;
-}
-
-/* A slim control strip instead of a stack of full-width buttons — the photo
-   is the point, these are secondary. */
-.modal-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.modal-details-toggle {
-  background: none;
-  border: none;
-  padding: 0;
-  color: #999;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.modal-details-toggle:hover {
-  color: #eee;
-}
-
 .modal-menu-wrap {
   position: relative;
 }
 
-.modal-menu-toggle {
-  padding: 0.2rem 0.6rem;
-  font-size: 1.1rem;
-  line-height: 1;
-}
-
 /* Anchored under the ⋮ button, right-aligned so it never overflows past the
-   info column's edge regardless of where the toolbar sits. */
+   modal's edge regardless of viewport width. */
 .modal-menu {
   position: absolute;
   top: calc(100% + 0.25rem);
@@ -313,14 +255,14 @@ nav a.active {
 }
 
 .modal-stage-status {
-  margin: 0.5rem 0 0;
+  margin: 0.75rem 0 0;
   color: #999;
   font-size: 0.75rem;
 }
 
 /* [hidden] and .modal-details have equal specificity, same tie as .modal
-   above — without :not([hidden]) here, display: grid always wins and the
-   toggle button's hidden = true never actually collapses anything. */
+   above — without :not([hidden]) here, display: grid always wins and
+   tapping the photo to collapse it back would never actually work. */
 .modal-details:not([hidden]) {
   margin: 0.75rem 0 0;
   display: grid;

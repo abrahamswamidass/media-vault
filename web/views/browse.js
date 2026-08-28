@@ -144,6 +144,10 @@ function closeMenu() {
   modal.querySelector(".modal-menu").hidden = true;
 }
 
+function toggleDetails() {
+  modal.querySelector(".modal-details").hidden = !modal.querySelector(".modal-details").hidden;
+}
+
 function openModal(item) {
   const img = modal.querySelector("img");
   img.src = "";
@@ -153,7 +157,6 @@ function openModal(item) {
 
   renderDetails(item);
   modal.querySelector(".modal-details").hidden = true;
-  modal.querySelector(".modal-details-toggle").textContent = "Details ▾";
   closeMenu();
   modal.querySelector(".modal-prev").disabled = currentIndex <= 0;
   modal.querySelector(".modal-next").disabled = currentIndex >= renderedItems.length - 1;
@@ -283,29 +286,27 @@ export function mount(container) {
     <button class="load-more">Load more</button>
     <div class="modal" hidden>
       <div class="modal-content">
-        <button class="modal-close">&times;</button>
-        <div class="modal-media">
+        <div class="modal-topbar">
+          <div class="modal-topbar-spacer"></div>
           <button class="modal-nav modal-prev" type="button" aria-label="Previous">&lsaquo;</button>
-          <img alt="" />
           <button class="modal-nav modal-next" type="button" aria-label="Next">&rsaquo;</button>
-        </div>
-        <div class="modal-info">
-          <div class="modal-toolbar">
-            <button class="modal-details-toggle" type="button">Details ▾</button>
-            <div class="modal-menu-wrap">
-              <button class="modal-menu-toggle" type="button" aria-label="More actions">⋮</button>
-              <div class="modal-menu" hidden>
-                <button class="modal-fullres" disabled
-                  title="Not wired up yet — the agent-side processor now exists (process-intents), this button just doesn't call it yet.">
-                  Request full-res (coming soon)
-                </button>
-                <button class="modal-stage-amazon" type="button">Stage for Amazon</button>
-              </div>
+          <div class="modal-menu-wrap">
+            <button class="modal-nav modal-menu-toggle" type="button" aria-label="More actions">&#8942;</button>
+            <div class="modal-menu" hidden>
+              <button class="modal-fullres" disabled
+                title="Not wired up yet — the agent-side processor now exists (process-intents), this button just doesn't call it yet.">
+                Request full-res (coming soon)
+              </button>
+              <button class="modal-stage-amazon" type="button">Stage for Amazon</button>
             </div>
           </div>
-          <p class="modal-stage-status"></p>
-          <dl class="modal-details" hidden></dl>
+          <button class="modal-nav modal-close" type="button" aria-label="Close">&times;</button>
         </div>
+        <div class="modal-media">
+          <img alt="" title="Tap for details" />
+        </div>
+        <p class="modal-stage-status"></p>
+        <dl class="modal-details" hidden></dl>
       </div>
     </div>
   `;
@@ -323,11 +324,7 @@ export function mount(container) {
     if (!modal.querySelector(".modal-menu-wrap").contains(e.target)) closeMenu();
     if (e.target === modal) modal.hidden = true;
   });
-  modal.querySelector(".modal-details-toggle").addEventListener("click", () => {
-    const details = modal.querySelector(".modal-details");
-    details.hidden = !details.hidden;
-    modal.querySelector(".modal-details-toggle").textContent = details.hidden ? "Details ▾" : "Details ▴";
-  });
+  modal.querySelector("img").addEventListener("click", toggleDetails);
   modal.querySelector(".modal-menu-toggle").addEventListener("click", (e) => {
     e.stopPropagation(); // don't let the modal-level listener above immediately re-close it
     modal.querySelector(".modal-menu").hidden = !modal.querySelector(".modal-menu").hidden;
