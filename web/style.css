@@ -223,14 +223,23 @@ nav a.active {
   flex: 1;
 }
 
+/* A fixed-height box, image centered inside it — without this, a portrait
+   photo and a landscape photo produce different-height elements, so the
+   photo (and the point on screen your finger is swiping) shifts vertically
+   between swipes. Centering here keeps that point stable regardless of
+   which photo is showing. */
 .modal-media {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 9rem);
 }
 
 .modal-content img {
   display: block;
-  width: 100%;
-  max-height: calc(100vh - 9rem);
+  max-width: 100%;
+  max-height: 100%;
   border-radius: 6px;
   object-fit: contain;
   cursor: pointer;
