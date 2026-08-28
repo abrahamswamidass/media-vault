@@ -170,6 +170,31 @@ nav a.active {
   overflow-y: auto;
 }
 
+/* Edge-to-edge on a phone — the photo itself should reach the screen's
+   sides, not sit in a card with its own margin/rounded corners. Text below
+   the image keeps its own inset (.modal-stage-status, .modal-details)
+   since unpadded body text flush against the screen edge is a readability
+   problem the photo doesn't have. */
+@media (max-width: 30rem) {
+  .modal {
+    padding: 0;
+  }
+  .modal-content {
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    padding: 3.25rem 0 1rem;
+  }
+  .modal-content img {
+    border-radius: 0;
+  }
+  .modal-stage-status,
+  .modal-details {
+    padding: 0 1rem;
+  }
+}
+
 .modal-topbar {
   position: absolute;
   top: 0.5rem;
@@ -223,8 +248,11 @@ nav a.active {
 }
 
 /* Anchored under the ⋮ button, right-aligned so it never overflows past the
-   modal's edge regardless of viewport width. */
-.modal-menu {
+   modal's edge regardless of viewport width. [hidden] and .modal-menu have
+   equal specificity — same tie .modal/.modal-details already needed
+   :not([hidden]) for — so without it, display: flex always won and the
+   menu showed open by default regardless of the hidden attribute. */
+.modal-menu:not([hidden]) {
   position: absolute;
   top: calc(100% + 0.25rem);
   right: 0;
