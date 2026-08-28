@@ -148,7 +148,36 @@ function toggleDetails() {
   modal.querySelector(".modal-details").hidden = !modal.querySelector(".modal-details").hidden;
 }
 
+// iOS Safari lets a touch-scroll gesture over a `position: fixed` overlay
+// fall through and scroll the page underneath it — `.modal-content`'s own
+// `overflow-y: auto` doesn't stop that. Freezing the body in place (and
+// remembering where it was) while the modal is open is the standard
+// workaround; plain `overflow: hidden` on body alone doesn't reliably work
+// on iOS Safari specifically.
+let savedScrollY = 0;
+
+function lockBodyScroll() {
+  savedScrollY = window.scrollY;
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${savedScrollY}px`;
+  document.body.style.width = "100%";
+}
+
+function unlockBodyScroll() {
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.width = "";
+  window.scrollTo(0, savedScrollY);
+}
+
+function closeModal() {
+  modal.hidden = true;
+  unlockBodyScroll();
+}
+
 function openModal(item) {
+  if (modal.hidden) lockBodyScroll(); // only on the closed -> open transition, not on prev/next
+
   const img = modal.querySelector("img");
   img.src = "";
   getDownloadURL(ref(storage, item.thumbnail_key))
@@ -197,7 +226,7 @@ function handleKeydown(e) {
   if (modal.hidden) return;
   if (e.key === "ArrowLeft") showAt(currentIndex - 1);
   else if (e.key === "ArrowRight") showAt(currentIndex + 1);
-  else if (e.key === "Escape") modal.hidden = true;
+  else if (e.key === "Escape") closeModal();
 }
 
 // Swipe left/right on the photo — the expected way to move between photos
@@ -339,12 +368,12 @@ export function mount(container) {
   yearSelect = root.querySelector(".year-jump");
 
   loadMoreBtn.addEventListener("click", loadPage);
-  modal.querySelector(".modal-close").addEventListener("click", () => { modal.hidden = true; });
+  modal.querySelector(".modal-close").addEventListener("click", closeModal);
   modal.addEventListener("click", (e) => {
     // Outside the ⋮ menu (but still inside the modal) closes just the menu,
     // not the whole modal — e.g. tapping the photo while the menu is open.
     if (!modal.querySelector(".modal-menu-wrap").contains(e.target)) closeMenu();
-    if (e.target === modal) modal.hidden = true;
+    if (e.target === modal) closeModal();
   });
   modal.querySelector("img").addEventListener("click", toggleDetails);
   modal.querySelector(".modal-media").addEventListener("touchstart", handleTouchStart, { passive: true });
@@ -377,5 +406,10 @@ export function mount(container) {
 
 export function unmount() {
   document.removeEventListener("keydown", handleKeydown);
+  // Navigating to another tab (Map, Amazon, ...) while the modal is open
+  // wipes it via innerHTML below without ever going through closeModal() —
+  // without this, the body-scroll lock from lockBodyScroll() would stay
+  // stuck on, breaking scroll everywhere else in the app.
+  if (modal && !modal.hidden) unlockBodyScroll();
   root.innerHTML = "";
 }
