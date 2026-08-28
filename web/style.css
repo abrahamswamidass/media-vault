@@ -211,18 +211,6 @@ nav a.active {
   }
 }
 
-.modal-title {
-  font-weight: 600;
-  margin: 0 0 0.25rem;
-  word-break: break-all;
-}
-
-.modal-meta {
-  color: #999;
-  font-size: 0.85rem;
-  margin: 0 0 1rem;
-}
-
 .modal-close {
   position: absolute;
   top: 0.5rem;
@@ -260,30 +248,16 @@ nav a.active {
   right: 0.75rem;
 }
 
-.modal-fullres:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.modal-stage-amazon {
-  display: block;
-  margin-top: 0.5rem;
-}
-
-.modal-stage-amazon:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.modal-stage-status {
-  margin: 0.4rem 0 0;
-  color: #999;
-  font-size: 0.75rem;
+/* A slim control strip instead of a stack of full-width buttons — the photo
+   is the point, these are secondary. */
+.modal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .modal-details-toggle {
-  display: block;
-  margin-top: 0.75rem;
   background: none;
   border: none;
   padding: 0;
@@ -294,6 +268,54 @@ nav a.active {
 
 .modal-details-toggle:hover {
   color: #eee;
+}
+
+.modal-menu-wrap {
+  position: relative;
+}
+
+.modal-menu-toggle {
+  padding: 0.2rem 0.6rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* Anchored under the ⋮ button, right-aligned so it never overflows past the
+   info column's edge regardless of where the toolbar sits. */
+.modal-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: #262626;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 0.4rem;
+  min-width: 12rem;
+}
+
+.modal-menu button {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.modal-fullres:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-stage-amazon:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.modal-stage-status {
+  margin: 0.5rem 0 0;
+  color: #999;
+  font-size: 0.75rem;
 }
 
 /* [hidden] and .modal-details have equal specificity, same tie as .modal

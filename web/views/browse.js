@@ -108,19 +108,26 @@ function renderCard(item) {
   return card;
 }
 
-//: field, label — in display order. Blank/undefined values are skipped.
-const DETAIL_FIELDS = [
-  ["source", "Source"],
-  ["mime", "Type"],
-  ["quick_hash", "Quick hash"],
-  ["thumbnail_key", "Thumbnail key"],
-];
-
+// Everything about an item lives in one collapsed-by-default panel — a full
+// path read as a page title (the old layout) doesn't mean anything at a
+// glance, and ate most of the screen on a phone before the photo itself was
+// even visible. name/path here, not a headline.
 function renderDetails(item) {
   const dl = modal.querySelector(".modal-details");
   dl.innerHTML = "";
+  const camera = [item.camera_make, item.camera_model].filter(Boolean).join(" ");
+  const dims = item.width && item.height ? `${item.width}×${item.height}` : null;
   const rows = [
-    ...DETAIL_FIELDS.map(([field, label]) => [label, item[field]]),
+    ["Name", item.name],
+    ["Path", item.item_id],
+    ["Taken", new Date(effectiveDate(item) * 1000).toLocaleString()],
+    ["Dimensions", dims],
+    ["Size", item.size ? `${(item.size / 1024).toFixed(0)} KB` : null],
+    ["Camera", camera || null],
+    ["Source", item.source],
+    ["Type", item.mime],
+    ["Quick hash", item.quick_hash],
+    ["Thumbnail key", item.thumbnail_key],
     ["Modified", item.mtime ? new Date(item.mtime * 1000).toLocaleString() : null],
   ];
   for (const [label, value] of rows) {
@@ -133,6 +140,10 @@ function renderDetails(item) {
   }
 }
 
+function closeMenu() {
+  modal.querySelector(".modal-menu").hidden = true;
+}
+
 function openModal(item) {
   const img = modal.querySelector("img");
   img.src = "";
@@ -140,16 +151,10 @@ function openModal(item) {
     .then((url) => { img.src = url; })
     .catch((err) => console.error(item.item_id, err));
 
-  modal.querySelector(".modal-title").textContent = item.item_id;
-  const camera = [item.camera_make, item.camera_model].filter(Boolean).join(" ");
-  const dims = item.width && item.height ? `${item.width}×${item.height} · ` : "";
-  modal.querySelector(".modal-meta").textContent =
-    `${dims}${(item.size / 1024).toFixed(0)} KB · `
-    + `${new Date(effectiveDate(item) * 1000).toLocaleString()}`
-    + (camera ? ` · ${camera}` : "");
   renderDetails(item);
   modal.querySelector(".modal-details").hidden = true;
   modal.querySelector(".modal-details-toggle").textContent = "Details ▾";
+  closeMenu();
   modal.querySelector(".modal-prev").disabled = currentIndex <= 0;
   modal.querySelector(".modal-next").disabled = currentIndex >= renderedItems.length - 1;
   const stageBtn = modal.querySelector(".modal-stage-amazon");
@@ -162,6 +167,7 @@ function openModal(item) {
 async function handleStageForAmazon() {
   const item = renderedItems[currentIndex];
   if (!item) return;
+  closeMenu();
   const btn = modal.querySelector(".modal-stage-amazon");
   const status = modal.querySelector(".modal-stage-status");
   btn.disabled = true;
@@ -284,15 +290,20 @@ export function mount(container) {
           <button class="modal-nav modal-next" type="button" aria-label="Next">&rsaquo;</button>
         </div>
         <div class="modal-info">
-          <p class="modal-title"></p>
-          <p class="modal-meta"></p>
-          <button class="modal-fullres" disabled
-            title="Not wired up yet — the agent-side processor now exists (process-intents), this button just doesn't call it yet.">
-            Request full-res (coming soon)
-          </button>
-          <button class="modal-stage-amazon" type="button">Stage for Amazon</button>
+          <div class="modal-toolbar">
+            <button class="modal-details-toggle" type="button">Details ▾</button>
+            <div class="modal-menu-wrap">
+              <button class="modal-menu-toggle" type="button" aria-label="More actions">⋮</button>
+              <div class="modal-menu" hidden>
+                <button class="modal-fullres" disabled
+                  title="Not wired up yet — the agent-side processor now exists (process-intents), this button just doesn't call it yet.">
+                  Request full-res (coming soon)
+                </button>
+                <button class="modal-stage-amazon" type="button">Stage for Amazon</button>
+              </div>
+            </div>
+          </div>
           <p class="modal-stage-status"></p>
-          <button class="modal-details-toggle" type="button">Details ▾</button>
           <dl class="modal-details" hidden></dl>
         </div>
       </div>
@@ -306,11 +317,20 @@ export function mount(container) {
 
   loadMoreBtn.addEventListener("click", loadPage);
   modal.querySelector(".modal-close").addEventListener("click", () => { modal.hidden = true; });
-  modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
+  modal.addEventListener("click", (e) => {
+    // Outside the ⋮ menu (but still inside the modal) closes just the menu,
+    // not the whole modal — e.g. tapping the photo while the menu is open.
+    if (!modal.querySelector(".modal-menu-wrap").contains(e.target)) closeMenu();
+    if (e.target === modal) modal.hidden = true;
+  });
   modal.querySelector(".modal-details-toggle").addEventListener("click", () => {
     const details = modal.querySelector(".modal-details");
     details.hidden = !details.hidden;
     modal.querySelector(".modal-details-toggle").textContent = details.hidden ? "Details ▾" : "Details ▴";
+  });
+  modal.querySelector(".modal-menu-toggle").addEventListener("click", (e) => {
+    e.stopPropagation(); // don't let the modal-level listener above immediately re-close it
+    modal.querySelector(".modal-menu").hidden = !modal.querySelector(".modal-menu").hidden;
   });
   modal.querySelector(".modal-prev").addEventListener("click", () => showAt(currentIndex - 1));
   modal.querySelector(".modal-next").addEventListener("click", () => showAt(currentIndex + 1));

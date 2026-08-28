@@ -423,6 +423,11 @@ want staging to happen automatically. The **Amazon** tab is read-only — it
 lists what's been requested and its current status (waiting / working /
 staged / failed), not a picker of its own.
 
+**Add it to your phone's home screen** for a proper app-like icon —
+`manifest.json` and the `apple-touch-icon` are already wired in. On iOS:
+Safari → Share → **Add to Home Screen**. Opens without the browser's address
+bar, same as a real app.
+
 ### 1. Add Firebase to the project
 
 1. [Firebase console](https://console.firebase.google.com) → **Add project**

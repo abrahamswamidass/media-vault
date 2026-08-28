@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Media Vault</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="icons/favicon.png" />
+
+  <!-- "Add to Home Screen" support — Safari on iOS ignores manifest.json for
+       the icon (unlike Chrome/Android), so apple-touch-icon is required
+       separately even though it duplicates icons/icon-192.png below. -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Media Vault" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#111111" />
+  <link rel="manifest" href="manifest.json" />
 </head>
 <body>
   <header>
