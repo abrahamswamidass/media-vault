@@ -33,17 +33,28 @@ agent/           Module 1 — local Python. The only thing that touches files.
 web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  (no build step) — a placeholder MVP, not the eventual React
                  app. app.js is a sign-in gate + hash router; each tab is a
-                 view module (views/browse.js, map.js, duplicates.js,
-                 amazon.js) exporting mount()/unmount(). Browse (chronological
-                 grid, paginated), Map (geotagged items on a Leaflet/OSM map),
-                 and Amazon (read-only status of staged intents) are
-                 functional; duplicates is a stub — see its file comment for
-                 what's blocking it. Picking a photo to stage happens in
-                 Browse/Map's own UI (intents.js), not in the Amazon tab
-                 itself. Google sign-in gated to a small hardcoded allowlist
-                 (family/household accounts, not the general public);
-                 enforced server-side by firestore.rules/storage.rules,
-                 not by hiding the URL. See docs/setup.md's "Web viewer".
+                 view module (views/browse.js, map.js, folders.js,
+                 duplicates.js, amazon.js) exporting mount()/unmount(). Nav is
+                 grouped: Browse/Map/Folders (three ways to look at the same
+                 library — by date, by location, by NAS folder structure) sit
+                 left of a divider; Duplicates/Amazon (maintenance/status
+                 tools, not library views) sit right of it. Browse
+                 (chronological grid, paginated), Map (geotagged items on a
+                 Leaflet/OSM map), Folders (drills into item_id path
+                 segments — Firestore has no real hierarchy, so this is
+                 computed client-side, paginated the same way Browse is), and
+                 Amazon (read-only status of staged intents) are functional;
+                 duplicates is a stub — see its file comment for what's
+                 blocking it. The photo modal (photoModal.js) is a
+                 body-level singleton shared by Browse and Folders rather
+                 than duplicated per view — app.js's router force-closes it
+                 on every navigation so it can't outlive the view that
+                 opened it. Picking a photo to stage happens in that modal
+                 (intents.js), not in the Amazon tab itself. Google sign-in
+                 gated to a small hardcoded allowlist (family/household
+                 accounts, not the general public); enforced server-side by
+                 firestore.rules/storage.rules, not by hiding the URL. See
+                 docs/setup.md's "Web viewer".
 shared/contracts/ JSON Schema both modules validate against. Change here first.
 docs/            architecture.html, setup.md, command-catalog.html
 ```

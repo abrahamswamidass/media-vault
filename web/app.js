@@ -6,12 +6,17 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { auth } from "./firebase.js";
 import { ALLOWED_EMAILS } from "./firebase-config.js";
+import { closePhotoModal } from "./photoModal.js";
 import * as browseView from "./views/browse.js";
 import * as mapView from "./views/map.js";
+import * as foldersView from "./views/folders.js";
 import * as duplicatesView from "./views/duplicates.js";
 import * as amazonView from "./views/amazon.js";
 
-const VIEWS = { browse: browseView, map: mapView, duplicates: duplicatesView, amazon: amazonView };
+const VIEWS = {
+  browse: browseView, map: mapView, folders: foldersView,
+  duplicates: duplicatesView, amazon: amazonView,
+};
 const DEFAULT_VIEW = "browse";
 
 const statusEl = document.getElementById("status");
@@ -39,6 +44,10 @@ function route() {
   const name = viewNameFromHash();
   if (name === currentView) return;
 
+  // The photo modal is a body-level singleton (see photoModal.js), not
+  // owned by any one view — without this, it could stay open floating
+  // over whichever view you navigate to next.
+  closePhotoModal();
   if (currentView) VIEWS[currentView].unmount(viewEl);
   currentView = name;
   for (const link of navEl.querySelectorAll("a")) {

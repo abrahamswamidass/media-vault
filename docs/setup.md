@@ -402,14 +402,22 @@ pushes real thumbnails to the bucket and metadata documents to Firestore's
 `web/` is a minimal static page — no build step, Google sign-in gated to a
 small hardcoded allowlist — that reads the `items` Firestore collection and
 shows a thumbnail grid. It's an MVP placeholder, not the eventual React app.
-A second tab, **Map**, pins every geotagged item on a Leaflet/OpenStreetMap
-map — no API key, no cost, loaded from a CDN only when that tab is opened.
-Most photos have no GPS at all (screenshots, edited exports, location off),
-so an empty or sparse map is normal, not a sign anything's broken. Access is
-gated server-side by `firestore.rules` and `storage.rules`, both hardcoded
-to the same allowlist of emails — not by hiding the URL. GCS's `allUsers`
-IAM grant explicitly cannot be scoped to a prefix (Google rejects conditions
-on public principals), so this is the actual private-by-default path, not a
+The nav groups three ways to look at the same library, left of a divider:
+**Browse** (chronological, the default), **Map** (every geotagged item pinned
+on a Leaflet/OpenStreetMap map — no API key, no cost, loaded from a CDN only
+when that tab is opened; most photos have no GPS at all, so an empty or
+sparse map is normal, not a sign anything's broken), and **Folders** (drills
+into the same NAS folder structure the agent indexed — Firestore has no real
+hierarchy, so "folders" are computed on the fly from item_id path segments as
+each page loads, the same client-side, paginated approach Browse uses for
+"Load more"). Right of the divider: **Duplicates** (stub) and **Amazon**
+(read-only staging status) — maintenance/status tools, not library views.
+Clicking a photo in Browse or Folders opens the same modal (they share one
+instance — see CLAUDE.md's web/ section). Access is gated server-side by
+`firestore.rules` and `storage.rules`, both hardcoded to the same allowlist
+of emails — not by hiding the URL. GCS's `allUsers` IAM grant explicitly
+cannot be scoped to a prefix (Google rejects conditions on public
+principals), so this is the actual private-by-default path, not a
 workaround.
 
 **Staging a photo for Amazon** works from Browse or Map's own photo view
