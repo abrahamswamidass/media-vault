@@ -268,4 +268,62 @@ def test_upload_dry_run_writes_nothing(fake_smbclient_writable, tmp_path):
     result = conn.upload(str(src), dest="Photos/img.jpg", commit=False)
 
     assert not result.committed
-    assert store == {}
+
+
+# --------------------------------------------------------------------------- #
+# read_chunks() — regression: hashing a duplicate candidate used to go
+# through read(), loading the entire file into memory in one call. A real
+# multi-gigabyte video (5GB .MOV over SMB) OOM-killed the process outright —
+# no traceback, since that isn't a catchable Python exception.
+# --------------------------------------------------------------------------- #
+class _FakeReadableFile:
+    def __init__(self, data: bytes):
+        self._data = data
+        self._pos = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        pass
+
+    def read(self, n: int = -1) -> bytes:
+        if n is None or n < 0:
+            chunk = self._data[self._pos:]
+            self._pos = len(self._data)
+        else:
+            chunk = self._data[self._pos:self._pos + n]
+            self._pos += len(chunk)
+        return chunk
+
+
+@pytest.fixture
+def fake_smbclient_readable(fake_smbclient):
+    store = {}
+    fake_smbclient.open_file = lambda unc, mode: _FakeReadableFile(store[unc])
+    return fake_smbclient, store
+
+
+def test_read_chunks_yields_the_whole_file_in_bounded_pieces(fake_smbclient_readable):
+    fake, store = fake_smbclient_readable
+    conn = _connector(fake, root="")
+    data = bytes(range(256)) * 1000  # 256000 bytes
+    store[conn._to_unc("img.jpg")] = data
+
+    chunks = list(conn.read_chunks("img.jpg", chunk_size=1000))
+
+    assert b"".join(chunks) == data
+    assert len(chunks) == 256  # 256000 / 1000, each capped at chunk_size
+    assert all(len(c) <= 1000 for c in chunks)
+
+
+def test_read_chunks_handles_a_file_not_evenly_divisible_by_chunk_size(fake_smbclient_readable):
+    fake, store = fake_smbclient_readable
+    conn = _connector(fake, root="")
+    data = b"x" * 2500
+    store[conn._to_unc("img.jpg")] = data
+
+    chunks = list(conn.read_chunks("img.jpg", chunk_size=1000))
+
+    assert b"".join(chunks) == data
+    assert [len(c) for c in chunks] == [1000, 1000, 500]

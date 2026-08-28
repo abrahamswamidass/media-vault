@@ -83,9 +83,16 @@ def _keeper_reason(keeper: sqlite3.Row, others: list[sqlite3.Row]) -> str:
 
 
 def _full_hash(connector: Connector, item_id: str) -> str:
-    """SHA-256 of the entire file. Only ever called on duplicate candidates."""
+    """SHA-256 of the entire file. Only ever called on duplicate candidates.
+
+    Streams via read_chunks() rather than one read() call that loads the
+    whole file into memory — a multi-gigabyte video (a real crash: a 5GB
+    .MOV over SMB) can make the OS OOM-kill the process outright, with no
+    traceback at all since that isn't a catchable Python exception.
+    """
     h = hashlib.sha256()
-    h.update(connector.read(item_id))
+    for chunk in connector.read_chunks(item_id):
+        h.update(chunk)
     return h.hexdigest()
 
 

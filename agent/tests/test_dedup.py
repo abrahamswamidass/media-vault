@@ -525,3 +525,23 @@ def test_reindexing_a_changed_file_invalidates_its_cached_hash(nas, catalog):
     row = catalog.conn.execute(
         "SELECT full_hash FROM items WHERE item_id = 'a.jpg'").fetchone()
     assert row["full_hash"] is None  # stale hash cleared, not silently reused
+
+
+def test_confirmation_streams_via_read_chunks_not_whole_file_read(nas, catalog, monkeypatch):
+    """Regression: hashing a candidate used to call connector.read(), loading
+    the entire file into memory in one call — a real crash on a multi-
+    gigabyte video (OOM-killed the process, no traceback). Confirming a
+    connector whose plain read() is broken must still succeed via
+    read_chunks()."""
+    _write(nas, "a.jpg", BIG, mtime=1_000_000)
+    _write(nas, "b.jpg", BIG, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    def _no_whole_file_reads(*a, **k):
+        raise AssertionError("must not call read() — should stream via read_chunks()")
+    monkeypatch.setattr(conn, "read", _no_whole_file_reads)
+
+    groups = find_duplicates(catalog, "nas", conn)
+
+    assert groups[0].confirmed
+    assert groups[0].losers  # actually confirmed identical, not just skipped

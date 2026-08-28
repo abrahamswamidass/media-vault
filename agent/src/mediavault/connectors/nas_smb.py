@@ -247,6 +247,22 @@ class SMBNASConnector(Connector):
         with self._smb.open_file(unc, mode="rb") as f:
             return f.read() if nbytes <= 0 else f.read(nbytes)
 
+    def read_chunks(self, item_id: str, chunk_size: int = 8 * 1024 * 1024) -> Iterable[bytes]:
+        """Stream instead of read()'s single whole-file call — see ports.py's
+        docstring for why. Not wrapped in _retry(): that helper retries one
+        atomic call, and a generator's body doesn't run at all until
+        iterated, so wrapping it here would silently never catch anything.
+        A drop mid-stream just propagates up to dedup's _confirm(), which
+        already treats any failure as "can't confirm this one, leave it
+        alone" — safe by construction, not a gap this needs to also cover."""
+        unc, _ = self._resolve(item_id)
+        with self._smb.open_file(unc, mode="rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    return
+                yield chunk
+
     # --- write side ----------------------------------------------------------#
     def delete(self, item_id: str, commit: bool = False) -> OpResult:
         """SOFT delete: move into trash over SMB, preserving relative structure."""

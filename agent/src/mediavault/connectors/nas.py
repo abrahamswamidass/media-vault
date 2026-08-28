@@ -98,6 +98,18 @@ class NASConnector(Connector):
         with p.open("rb") as f:
             return f.read() if nbytes <= 0 else f.read(nbytes)
 
+    def read_chunks(self, item_id: str, chunk_size: int = 8 * 1024 * 1024) -> Iterable[bytes]:
+        """Stream instead of read()'s single whole-file call — see ports.py's
+        docstring for why (dedup hashing a multi-gigabyte file shouldn't
+        need to hold the whole thing in memory at once)."""
+        p = self._resolve(item_id)
+        with p.open("rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    return
+                yield chunk
+
     # --- write side ------------------------------------------------------- #
     def delete(self, item_id: str, commit: bool = False) -> OpResult:
         """SOFT delete: move into trash, preserving relative structure. Reversible."""

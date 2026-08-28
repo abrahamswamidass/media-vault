@@ -162,6 +162,17 @@ class Connector(ABC):
         """Return file bytes. nbytes=0 => whole file; >0 => just the first N (safe peek)."""
         raise NotSupported(f"{self.name}: read not implemented")
 
+    def read_chunks(self, item_id: str, chunk_size: int = 8 * 1024 * 1024) -> Iterable[bytes]:
+        """Stream a file's bytes in bounded chunks instead of loading it all
+        into memory at once — what dedup's full-content confirmation uses to
+        hash a candidate. A multi-gigabyte video read whole via `read()` can
+        OOM-kill the process outright with no traceback at all (unlike a
+        catchable MemoryError, the OS just terminates the process). Default
+        falls back to one `read()` call — fine for small files; a connector
+        expected to see large ones should override this properly (see
+        nas_smb.py and nas.py)."""
+        yield self.read(item_id)
+
     # --- write side (guarded) -------------------------------------------- #
     def delete(self, item_id: str, commit: bool = False) -> OpResult:
         raise NotSupported(f"{self.name}: delete not supported")
