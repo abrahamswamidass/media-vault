@@ -535,6 +535,24 @@ nav a.active {
 .amazon-status-failed { color: #d97070; }
 .amazon-status-pending, .amazon-status-claimed { color: #999; }
 
+.agent-heartbeat {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #999;
+}
+
+.agent-heartbeat-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agent-heartbeat-dot.is-live { background: #6dbf6d; }
+.agent-heartbeat-dot.is-stale { background: #d97070; }
+
 .amazon-row-when {
   font-size: 0.7rem;
   color: #777;

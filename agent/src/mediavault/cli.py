@@ -576,6 +576,13 @@ def cmd_process_intents(args) -> int:
                 stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 print(f"\n[{stamp}] polling...", flush=True)
                 _process_intents_once(args, intents_store, catalog)
+                # Best-effort: a status-doc write failing (e.g. a transient
+                # Firestore hiccup) shouldn't kill an otherwise-healthy loop.
+                try:
+                    still_pending = len(intents_store.peek_pending(limit=1000))
+                    intents_store.heartbeat(still_pending)
+                except Exception as e:
+                    print(f"  (heartbeat failed: {e})")
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nStopped.")

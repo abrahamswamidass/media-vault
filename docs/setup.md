@@ -533,6 +533,17 @@ The **Amazon** tab is read-only — it lists what's been requested and its
 current status (waiting / working / staged / failed), not a picker of its
 own.
 
+**A green/red dot in the page header** shows whether `process-intents
+--watch` is actually running — it's not Amazon-specific since the watch loop
+processes every intent type (fetch_fullres, delete, copy, index,
+dedup_source, publish, stage_for_amazon, ...), so it lives in the shared
+header instead of one tab. `--watch` writes a heartbeat
+(`agent_status/process_intents`: last-poll time + pending count) each time
+it polls; the dot goes red if that heartbeat is more than 20 minutes old or
+missing entirely — meaning nothing is currently watching, so any request
+(not just Amazon staging) would just sit pending until someone runs
+`process-intents` by hand.
+
 **Add it to your phone's home screen** for a proper app-like icon —
 `manifest.json` and the `apple-touch-icon` are already wired in. On iOS:
 Safari → Share → **Add to Home Screen**. Opens without the browser's address

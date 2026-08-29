@@ -7,6 +7,7 @@ import {
 import { auth } from "./firebase.js";
 import { ALLOWED_EMAILS } from "./firebase-config.js";
 import { closePhotoModal } from "./photoModal.js";
+import * as agentHeartbeat from "./agentHeartbeat.js";
 import * as browseView from "./views/browse.js";
 import * as mapView from "./views/map.js";
 import * as foldersView from "./views/folders.js";
@@ -25,6 +26,7 @@ const viewEl = document.getElementById("view");
 const signinEl = document.getElementById("signin");
 const signinBtn = document.getElementById("signin-btn");
 const signoutBtn = document.getElementById("signout-btn");
+const heartbeatEl = document.getElementById("agent-heartbeat");
 
 let currentView = null;
 
@@ -65,17 +67,21 @@ onAuthStateChanged(auth, (user) => {
   navEl.hidden = !signedIn;
   viewEl.hidden = !signedIn;
   signoutBtn.hidden = !signedIn;
+  heartbeatEl.hidden = !signedIn;
 
   if (!user) {
+    agentHeartbeat.stop();
     statusEl.textContent = "Sign in to view your library.";
     return;
   }
   if (!signedIn) {
+    agentHeartbeat.stop();
     statusEl.textContent = `${user.email} isn't authorized for this gallery.`;
     signOut(auth);
     return;
   }
   statusEl.textContent = "";
+  agentHeartbeat.start(heartbeatEl);
   if (!location.hash) location.hash = `#${DEFAULT_VIEW}`;
   route();
 });

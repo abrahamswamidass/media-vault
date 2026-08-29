@@ -140,6 +140,14 @@ class IntentsStore(ABC):
     def fail(self, intent_id: str, result: dict) -> None:
         """Mark one intent 'failed', with its ActionResult (or error dict)."""
 
+    def heartbeat(self, pending_count: int) -> None:
+        """Record that a `process-intents --watch` loop is alive right now.
+
+        Concrete method, not abstract, with a no-op default: this is a nice-
+        to-have status signal for the web UI (see PublishAction/facts.py for
+        the same "web module can look but not touch" shape), not part of the
+        core claim/run contract every adapter must implement."""
+
 
 # --------------------------------------------------------------------------- #
 # The interface every connector implements

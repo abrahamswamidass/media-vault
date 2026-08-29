@@ -41,5 +41,15 @@ service cloud.firestore {
                        ];
       allow update, delete: if false;
     }
+
+    // Written only by the agent's Admin client (process-intents --watch),
+    // bypassing these rules like items/ above. Read-only status signal for
+    // the web UI's header dot (see agentHeartbeat.js) — never written from
+    // the client.
+    match /agent_status/{docId} {
+      allow read: if request.auth != null
+                  && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
+      allow write: if false;
+    }
   }
 }
