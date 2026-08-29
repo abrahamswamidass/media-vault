@@ -135,6 +135,16 @@ box** — `pillow-heif` is baked into the image alongside Pillow itself, no
 extra setup. Without it, every HEIC would fail with an unhelpful "cannot
 identify image file" rather than publishing.
 
+**Video thumbnails work the same way, one step earlier**: Pillow can't open
+a `.MOV`/`.mp4` container at all, so `publish` pulls one representative
+frame via `ffmpeg` (baked into the image alongside `exiftool` — no extra
+setup) before handing it to the same thumbnail/preview pipeline a photo
+goes through. It seeks 1 second into the clip (a phone video's very first
+frame is often black or still mid-focus-hunt) and falls back to frame zero
+for anything shorter. If `ffmpeg` is ever missing from the image, a video
+fails publish with a clear "ffmpeg is not installed" error rather than
+Pillow's unhelpful "cannot identify image file."
+
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates, video duration, and shooting
 settings — aperture, shutter speed, ISO, exposure compensation, focal length

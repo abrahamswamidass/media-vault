@@ -13,7 +13,7 @@ from mediavault.actions import (
     STATUS_FAILED, STATUS_NOOP, STATUS_OK,
 )
 from mediavault.actions.base import Action
-from mediavault.actions.derive import FetchFullResAction
+from mediavault.actions.derive import FetchFullResAction, ThumbnailAction
 from mediavault.connectors.nas import NASConnector
 from mediavault.blobstore import LocalBlobStore, blob_key
 
@@ -122,6 +122,48 @@ def test_unknown_variant_is_refused(nas, blobs):
 
     assert result.status == STATUS_FAILED
     assert "unknown variant" in result.error
+
+
+# --------------------------------------------------------------------------- #
+# Thumbnails — video routed through frame extraction before Pillow ever sees it
+# --------------------------------------------------------------------------- #
+def test_thumbnail_action_extracts_a_frame_for_video(nas, blobs, monkeypatch):
+    """Pillow can't open a video container at all ("cannot identify image
+    file") — a real failure that hit 8 of 50 publish attempts. ThumbnailAction
+    must hand video bytes to imaging.frame() first, not straight to thumbnail()."""
+    (nas.root / "Photos" / "clip.mov").write_bytes(b"pretend-video-bytes")
+    calls = []
+
+    def fake_frame(data, suffix=""):
+        calls.append(("frame", data, suffix))
+        return b"fake-frame-jpeg"
+
+    def fake_thumbnail(data):
+        calls.append(("thumbnail", data))
+        return b"fake-webp"
+
+    monkeypatch.setattr("mediavault.actions.derive.imaging.frame", fake_frame)
+    monkeypatch.setattr("mediavault.actions.derive.imaging.thumbnail", fake_thumbnail)
+
+    result = ThumbnailAction("Photos/clip.mov", nas, blobs).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert calls == [
+        ("frame", b"pretend-video-bytes", ".mov"),
+        ("thumbnail", b"fake-frame-jpeg"),
+    ]
+
+
+def test_thumbnail_action_skips_frame_extraction_for_photos(nas, blobs, monkeypatch):
+    """Regression guard: the video branch must not misfire for an ordinary photo."""
+    def frame_must_not_run(*a, **k):
+        raise AssertionError("frame() must not run for a photo")
+    monkeypatch.setattr("mediavault.actions.derive.imaging.frame", frame_must_not_run)
+    monkeypatch.setattr("mediavault.actions.derive.imaging.thumbnail", lambda data: b"fake-webp")
+
+    result = ThumbnailAction("Photos/img_001.jpg", nas, blobs).run(commit=True)
+
+    assert result.status == STATUS_OK
 
 
 # --------------------------------------------------------------------------- #

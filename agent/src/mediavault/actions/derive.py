@@ -15,10 +15,22 @@ no-op instead of re-reading the NAS.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from .. import imaging
 from ..blobstore import blob_key
 from ..ports import BlobStore, Connector
 from .base import Action, NoOp
+
+
+def _read_decodable(connector: Connector, item_id: str, mime: str) -> bytes:
+    """Raw bytes ready for Pillow. For video, that's one representative
+    frame (see imaging.frame()) rather than the container itself, which
+    Pillow can't open at all."""
+    raw = connector.read(item_id)
+    if (mime or "").startswith("video/"):
+        return imaging.frame(raw, suffix=Path(item_id).suffix)
+    return raw
 
 
 class ThumbnailAction(Action):
@@ -65,7 +77,8 @@ class ThumbnailAction(Action):
         key = self._key
         if not self.force and self.blobs.exists(key):
             raise NoOp(f"thumbnail already stored: {key}")
-        data = imaging.thumbnail(self.connector.read(self.item_id))
+        decodable = _read_decodable(self.connector, self.item_id, self._record.mime)
+        data = imaging.thumbnail(decodable)
         self.blobs.put(key, data, content_type="image/webp")
         return {"key": key, "bytes": len(data), "url": self.blobs.url(key)}
 
@@ -147,11 +160,11 @@ class FetchFullResAction(Action):
             raise NoOp(f"already available: {key}")
 
         _, content_type = self.VARIANTS[self.variant]
-        raw = self.connector.read(self.item_id)
         if self.variant == "preview":
-            data = imaging.preview(raw)
+            decodable = _read_decodable(self.connector, self.item_id, self._record.mime)
+            data = imaging.preview(decodable)
         else:
-            data = raw
+            data = self.connector.read(self.item_id)
             content_type = self._record.mime or content_type
 
         self.blobs.put(key, data, content_type=content_type)
