@@ -171,7 +171,7 @@ class PublishAction(Action):
 
     def __init__(self, source: str, connector: Connector, catalog: Catalog,
                  blobs: BlobStore, facts: FactsStore, *, max_items: Optional[int] = None,
-                 force: bool = False, mime_only: bool = False):
+                 force: bool = False, mime_only: bool = False, debug: bool = False):
         self.source = source
         self.connector = connector
         self.catalog = catalog
@@ -189,6 +189,10 @@ class PublishAction(Action):
         # doesn't select items indexed_at-first that still have none. See
         # Catalog.unpublished()'s docstring.
         self.mime_only = mime_only
+        # Prints each face's actual nearest-person distance and match/no-match
+        # outcome — for seeing why clustering did or didn't group two photos
+        # together, since that can't be answered by re-reading the code.
+        self.debug = debug
         self._pending = None
 
     @property
@@ -200,7 +204,7 @@ class PublishAction(Action):
         return {"source": self.source, "connector": self.connector.name,
                 "blobstore": self.blobs.name, "facts": self.facts.name,
                 "max_items": self.max_items, "force": self.force,
-                "mime_only": self.mime_only}
+                "mime_only": self.mime_only, "debug": self.debug}
 
     def validate(self) -> tuple[bool, str]:
         if self.catalog.count(self.source) == 0:
@@ -266,10 +270,17 @@ class PublishAction(Action):
                     str(f["person_id"]) for f in existing if f["person_id"] is not None})
                 mime = row["mime"] or ""
                 if not existing and os.getenv("FACES_LIVE", "0") == "1" and mime.startswith("image/"):
+                    on_match = None
+                    if self.debug:
+                        def on_match(best_id, best_dist, matched, _item_id=item_id):
+                            dist_str = f"{best_dist:.3f}" if best_dist is not None else "n/a"
+                            outcome = f"matched person {best_id}" if matched else "new person"
+                            print(f"    face in {_item_id}: nearest dist {dist_str} "
+                                  f"-> {outcome}", flush=True)
                     try:
                         full = self.connector.read(item_id)
                         for face in faces.detect_faces(full):
-                            person_id = assign_person(self.catalog, face["embedding"])
+                            person_id = assign_person(self.catalog, face["embedding"], on_match=on_match)
                             self.catalog.add_face(
                                 self.source, item_id, face["bbox"], face["score"],
                                 face["embedding"], person_id)

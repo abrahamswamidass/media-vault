@@ -348,7 +348,7 @@ def cmd_publish(args) -> int:
         result = log.record(
             PublishAction(args.source, connector, catalog, blobs, facts,
                           max_items=args.max_items, force=args.force,
-                          mime_only=args.mime_only).run(commit=args.commit))
+                          mime_only=args.mime_only, debug=args.debug).run(commit=args.commit))
 
         if args.json:
             _emit(result.to_dict(), True)
@@ -805,6 +805,10 @@ def build_parser() -> argparse.ArgumentParser:
                           "reached instead of the oldest-indexed items with none.")
     pub.add_argument("--commit", action="store_true",
                      help="ACTUALLY generate and push (default: preview only)")
+    pub.add_argument("--debug", action="store_true",
+                     help="with FACES_LIVE=1: print each detected face's nearest-person "
+                          "distance and match/no-match outcome — for seeing why "
+                          "clustering did or didn't group two photos together.")
     pub.set_defaults(_fn=cmd_publish, permanent=False)
 
     # -- stats --

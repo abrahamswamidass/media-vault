@@ -35,6 +35,7 @@ what each command actually touches.
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 | `people-reset --commit` | Wipe all detected faces/people to redo clustering — leaves items, scans, and published facts untouched. |
+| `publish nas --debug` (with `FACES_LIVE=1`) | Print each detected face's actual nearest-person distance and match/no-match outcome — for seeing why clustering did or didn't group two photos together. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
@@ -408,6 +409,18 @@ docker exec -e FACES_LIVE=1 media-vault-container python -m mediavault.cli publi
 ```
 Items keep their `published_at`, quick_hash, and EXIF — only face detection
 re-runs on the next `--force` publish.
+
+**If clustering still looks wrong afterward** — the same person split across
+many "new" people instead of grouping together — add `--debug` to see the
+actual numbers behind each decision, rather than guessing:
+```powershell
+docker exec -e FACES_LIVE=1 media-vault-container python -m mediavault.cli publish nas --force --max-items 20 --commit --debug
+```
+Prints each face's nearest existing person and the real distance to them,
+against `catalog/people.py`'s `MATCH_THRESHOLD` (0.9) — if genuinely
+same-person photos consistently land just above that line, the threshold
+itself may need loosening for your library, which is a one-line change to
+justify with real numbers rather than a guess.
 
 **What's stored where** — deliberately split, for privacy as much as
 architecture:

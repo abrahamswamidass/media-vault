@@ -69,6 +69,26 @@ def test_reset_people_clears_faces_and_people_but_nothing_else(catalog):
     assert row is not None and row["published_at"] is not None  # untouched
 
 
+def test_on_match_reports_the_nearest_distance_and_outcome(catalog):
+    """publish --debug uses this to show real distance numbers — the only
+    way to actually see why two photos did or didn't cluster together."""
+    calls = []
+    on_match = lambda best_id, best_dist, matched: calls.append((best_id, best_dist, matched))
+
+    first = assign_person(catalog, _embedding(1.0, 0.0, 0.0), on_match=on_match)
+    assert calls[-1] == (None, None, False)  # nothing to compare against yet
+
+    catalog.add_face("nas", "a.jpg", (0, 0, 10, 10), 0.9, _embedding(1.0, 0.0, 0.0), first)
+    assign_person(catalog, _embedding(1.0, 0.0, 0.0), on_match=on_match)
+    assert calls[-1] == (first, pytest.approx(0.0), True)
+
+    assign_person(catalog, _embedding(-1.0, 0.0, 0.0), on_match=on_match)
+    best_id, best_dist, matched = calls[-1]
+    assert best_id == first
+    assert best_dist == pytest.approx(2.0)  # opposite unit vectors
+    assert matched is False
+
+
 def test_matching_uses_each_persons_first_face_not_the_most_recent(catalog):
     """Centroid = first-ever face, deliberately not recomputed as more faces
     are added — a later, slightly different face shouldn't change who a new
