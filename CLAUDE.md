@@ -49,7 +49,13 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  computed client-side, paginated the same way Browse is), and
                  Amazon (read-only status of staged intents) are functional;
                  duplicates is a stub — see its file comment for what's
-                 blocking it. The photo modal (photoModal.js) is a
+                 blocking it. Folders can hide a folder (a checkbox per
+                 tile) — a pure display preference written straight to
+                 Firestore's hidden_folders/ collection from the browser
+                 (hiddenFolders.js), no intent needed since nothing on the
+                 NAS is touched; Browse and Map both filter it out, Folders
+                 itself never does since it's the only place to unhide. The
+                 photo modal (photoModal.js) is a
                  body-level singleton shared by Browse and Folders rather
                  than duplicated per view — app.js's router force-closes it
                  on every navigation so it can't outlive the view that

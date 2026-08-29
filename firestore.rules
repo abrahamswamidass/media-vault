@@ -51,5 +51,22 @@ service cloud.firestore {
                   && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
       allow write: if false;
     }
+
+    // Client-owned, unlike everything else here: hiding a folder is a pure
+    // display preference, not a file mutation, so there's no agent
+    // involvement and no intent round-trip needed — see hiddenFolders.js.
+    match /hidden_folders/{docId} {
+      allow read: if request.auth != null
+                  && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
+      // create/update (unhide-then-rehide overwrites the same doc id) are
+      // schema-checked; delete (unhide) has no request.resource to check
+      // against, just the same allowlist gate.
+      allow create, update: if request.auth != null
+                   && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"]
+                   && request.resource.data.keys().hasOnly(["path", "hidden_at"])
+                   && request.resource.data.path is string;
+      allow delete: if request.auth != null
+                    && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
+    }
   }
 }

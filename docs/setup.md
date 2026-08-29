@@ -498,7 +498,19 @@ each page loads, the same client-side, paginated approach Browse uses for
 "Load more"). Right of the divider: **Duplicates** (stub) and **Amazon**
 (read-only staging status) — maintenance/status tools, not library views.
 Clicking a photo in Browse or Folders opens the same modal (they share one
-instance — see CLAUDE.md's web/ section). Access is gated server-side by
+instance — see CLAUDE.md's web/ section).
+
+**Hiding a folder** — a checkbox on each folder tile in Folders — removes
+everything under it from Browse and Map, without touching a single file on
+the NAS. It's a pure display preference (`hidden_folders/` in Firestore,
+written straight from the browser, no intent round-trip: see
+`web/hiddenFolders.js`), not a mutation, so it needs none of the "web writes
+intents, agent decides" machinery everything else here goes through. Folders
+itself always shows every folder regardless of its hidden state — it's the
+control panel for this feature, so unhiding has to stay reachable from it.
+Unchecking the box brings a folder's contents right back everywhere.
+
+Access is gated server-side by
 `firestore.rules` and `storage.rules`, both hardcoded to the same allowlist
 of emails — not by hiding the URL. GCS's `allUsers` IAM grant explicitly
 cannot be scoped to a prefix (Google rejects conditions on public

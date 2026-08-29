@@ -11,6 +11,7 @@ import {
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
 import { openPhotoAt } from "../photoModal.js";
+import { loadHiddenPrefixes, setFolderHidden } from "../hiddenFolders.js";
 
 const PAGE_SIZE = 200; // higher than Browse's — most of a page here is cheap folder-name strings, not photo cards
 
@@ -25,6 +26,8 @@ let breadcrumbEl = null;
 let foldersEl = null;
 let filesGridEl = null;
 let loadMoreBtn = null;
+
+let hiddenPrefixes = new Set(); // path prefixes (each ending "/") hidden from Browse/Map
 
 let path = []; // [] = root; e.g. ["percial", "Photos", "2021"]
 let lastDoc = null;
@@ -64,11 +67,36 @@ function renderBreadcrumb() {
 }
 
 function renderFolderTile(name) {
+  const folderPath = `${currentPrefix()}${name}/`;
+
   const tile = document.createElement("div");
   tile.className = "folder-tile";
-  tile.innerHTML = `${FOLDER_ICON}<span></span>`;
+  tile.innerHTML = `
+    <label class="folder-hide" title="Hide from Browse and Map">
+      <input type="checkbox" />
+    </label>
+    ${FOLDER_ICON}<span></span>
+  `;
   tile.querySelector("span").textContent = name;
   tile.addEventListener("click", () => navigateTo([...path, name]));
+
+  const checkbox = tile.querySelector("input");
+  checkbox.checked = hiddenPrefixes.has(folderPath);
+  checkbox.addEventListener("click", (e) => e.stopPropagation());
+  checkbox.addEventListener("change", async () => {
+    checkbox.disabled = true;
+    try {
+      await setFolderHidden(folderPath, checkbox.checked);
+      if (checkbox.checked) hiddenPrefixes.add(folderPath);
+      else hiddenPrefixes.delete(folderPath);
+    } catch (err) {
+      checkbox.checked = !checkbox.checked;
+      console.error(folderPath, err);
+      statusEl.textContent = `Failed to update: ${err.message}`;
+    }
+    checkbox.disabled = false;
+  });
+
   foldersEl.appendChild(tile);
 }
 
@@ -182,7 +210,10 @@ export function mount(container) {
   loadMoreBtn = root.querySelector(".load-more");
 
   loadMoreBtn.addEventListener("click", loadPage);
-  navigateTo([]);
+  loadHiddenPrefixes()
+    .then((prefixes) => { hiddenPrefixes = prefixes; })
+    .catch((err) => console.error("hidden folders:", err))
+    .finally(() => navigateTo([]));
 }
 
 export function unmount() {

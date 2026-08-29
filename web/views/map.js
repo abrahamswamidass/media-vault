@@ -12,6 +12,7 @@ import {
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
 import { stageForAmazon } from "../intents.js";
+import { loadHiddenPrefixes, isHidden } from "../hiddenFolders.js";
 
 // A browser map gets sluggish with tens of thousands of individual markers —
 // this is a preview of where your library has been, not a full data dump.
@@ -37,12 +38,15 @@ async function ensureLeaflet() {
 }
 
 async function loadGeotaggedItems() {
-  const snap = await getDocs(query(
-    collection(db, "items"),
-    where("latitude", ">=", -90), where("latitude", "<=", 90),
-    limit(MAX_PINS),
-  ));
-  return snap.docs.map((d) => d.data());
+  const [snap, hiddenPrefixes] = await Promise.all([
+    getDocs(query(
+      collection(db, "items"),
+      where("latitude", ">=", -90), where("latitude", "<=", 90),
+      limit(MAX_PINS),
+    )),
+    loadHiddenPrefixes(),
+  ]);
+  return snap.docs.map((d) => d.data()).filter((item) => !isHidden(item.item_id, hiddenPrefixes));
 }
 
 function popupContent(item) {

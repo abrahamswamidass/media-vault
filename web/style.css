@@ -199,6 +199,16 @@ nav a.active {
   white-space: nowrap;
 }
 
+.folder-hide {
+  display: flex;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.folder-tile:has(.folder-hide input:checked) {
+  opacity: 0.5;
+}
+
 .stub {
   max-width: 32rem;
   padding: 2rem 0;

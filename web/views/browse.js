@@ -18,6 +18,7 @@ import {
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
 import { openPhotoAt } from "../photoModal.js";
+import { loadHiddenPrefixes, isHidden } from "../hiddenFolders.js";
 
 const PAGE_SIZE = 100;
 
@@ -123,8 +124,10 @@ async function loadPage() {
     loadMoreBtn.hidden = true;
   } else {
     lastDoc = snap.docs[snap.docs.length - 1];
+    const hiddenPrefixes = await loadHiddenPrefixes();
     for (const doc of snap.docs) {
       const item = doc.data();
+      if (isHidden(item.item_id, hiddenPrefixes)) continue;
       groupSection(groupKey(effectiveDate(item))).querySelector(".grid").appendChild(renderCard(item));
     }
     if (snap.docs.length < PAGE_SIZE) {
