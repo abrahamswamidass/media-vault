@@ -53,6 +53,38 @@
       "type": ["number", "null"], "minimum": 0,
       "description": "Video length, where present. Best-effort within the same head-read budget as the rest of this item's EXIF — a video whose duration atom wasn't in that window (common for large, non-\"fast start\" files) comes back null, not an error."
     },
+    "aperture": {
+      "type": ["string", "null"],
+      "description": "F-stop, exiftool's print-converted Composite:Aperture (e.g. \"1.8\")."
+    },
+    "shutter_speed": {
+      "type": ["string", "null"],
+      "description": "Exposure time, exiftool's print-converted Composite:ShutterSpeed (e.g. \"1/120\")."
+    },
+    "iso": {
+      "type": ["string", "null"],
+      "description": "ISO speed rating."
+    },
+    "exposure_compensation": {
+      "type": ["string", "null"],
+      "description": "Exposure bias in EV (e.g. \"-0.3\")."
+    },
+    "focal_length": {
+      "type": ["string", "null"],
+      "description": "Lens focal length as shot (e.g. \"4.2 mm\")."
+    },
+    "focal_length_35mm": {
+      "type": ["string", "null"],
+      "description": "35mm-equivalent focal length, for comparing across sensor sizes."
+    },
+    "metering_mode": {
+      "type": ["string", "null"],
+      "description": "Exiftool's print-converted metering mode (e.g. \"Pattern\")."
+    },
+    "flash": {
+      "type": ["string", "null"],
+      "description": "Exiftool's print-converted flash status (e.g. \"Flash, compulsory\")."
+    },
     "person_ids": {
       "type": "array", "items": { "type": "string" },
       "description": "Ids into the people collection, one per distinct face-cluster detected in this item (photos only). Opaque ids only -- no face embeddings or bounding boxes are ever published here; those stay in the agent's local catalog. Empty unless FACES_LIVE was on when this item was published."

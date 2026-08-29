@@ -45,6 +45,10 @@ def test_extract_maps_known_fields(fake_exiftool):
         "EXIF:DateTimeOriginal": "2026:01:15 10:30:00",
         "EXIF:Make": "Canon", "EXIF:Model": "EOS R5",
         "Composite:GPSLatitude": 37.7749, "Composite:GPSLongitude": -122.4194,
+        "Composite:Aperture": 1.8, "Composite:ShutterSpeed": "1/6",
+        "EXIF:ISO": 100, "EXIF:ExposureCompensation": "0",
+        "EXIF:FocalLength": "4.0 mm", "EXIF:FocalLengthIn35mmFormat": "26 mm",
+        "EXIF:MeteringMode": "Pattern", "EXIF:Flash": "Flash, compulsory",
     }]
 
     result = metadata.extract(b"fake bytes", suffix=".CR2")
@@ -57,6 +61,14 @@ def test_extract_maps_known_fields(fake_exiftool):
     assert result["longitude"] == -122.4194
     assert result["date_taken"] == _epoch("2026:01:15 10:30:00")
     assert result["duration_seconds"] is None
+    assert result["aperture"] == 1.8
+    assert result["shutter_speed"] == "1/6"
+    assert result["iso"] == 100
+    assert result["exposure_compensation"] == "0"
+    assert result["focal_length"] == "4.0 mm"
+    assert result["focal_length_35mm"] == "26 mm"
+    assert result["metering_mode"] == "Pattern"
+    assert result["flash"] == "Flash, compulsory"
 
 
 def test_extract_handles_missing_fields(fake_exiftool):
@@ -69,6 +81,9 @@ def test_extract_handles_missing_fields(fake_exiftool):
         "width": None, "height": None, "date_taken": None,
         "camera_make": None, "camera_model": None,
         "latitude": None, "longitude": None, "duration_seconds": None,
+        "aperture": None, "shutter_speed": None, "iso": None,
+        "exposure_compensation": None, "focal_length": None,
+        "focal_length_35mm": None, "metering_mode": None, "flash": None,
     }
 
 
@@ -78,16 +93,17 @@ def test_extract_handles_no_results(fake_exiftool):
     assert metadata.extract(b"fake", suffix=".jpg") == {}
 
 
-def test_extract_requests_numeric_mode(fake_exiftool):
-    """-n is what makes Duration come back as a plain number instead of a
-    print-converted string like "0:00:12" — GPS/date tags are unaffected
-    either way, but this is the flag that makes the duration test below
-    meaningful against the real exiftool binary, not just this fake."""
+def test_extract_does_not_request_numeric_mode(fake_exiftool):
+    """No -n: shooting-settings fields (MeteringMode, Flash, ...) are far
+    more useful in exiftool's own print-converted human form ("Pattern",
+    "Flash, compulsory") than as bare numeric codes -- and Duration's own
+    parser already handles the print-converted format on its own, so -n
+    was never actually necessary for that either."""
     fake_exiftool["result"] = [{}]
 
     metadata.extract(b"fake", suffix=".jpg")
 
-    assert fake_exiftool["params"] == ["-n"]
+    assert fake_exiftool["params"] is None
 
 
 def test_missing_pyexiftool_raises_metadata_unavailable(monkeypatch):

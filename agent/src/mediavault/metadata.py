@@ -53,11 +53,23 @@ _MIN_PLAUSIBLE_YEAR = 1995
 #: technically UTC per the QuickTime spec, while the EXIF tags are naive/
 #: local — this project doesn't track timezone anywhere else either, so that
 #: distinction is accepted rather than half-fixed for one field only).
+#:
+#: Shooting settings (aperture..flash) are display-only strings, deliberately
+#: NOT run through -n/numeric mode — exiftool's own print-conversion is what
+#: turns e.g. raw MeteringMode=5 into "Pattern" or Flash=25 into "Flash,
+#: compulsory", which is far more useful to show a person than the bare
+#: numeric code would be. Composite:Aperture/ShutterSpeed are used over the
+#: raw EXIF:FNumber/ExposureTime where available since exiftool normalizes
+#: those consistently across both iPhone and Canon-style EXIF, falling back
+#: to other tags (e.g. ApertureValue) internally when the direct one is absent.
 _TAGS = ["File:ImageWidth", "File:ImageHeight",
          "EXIF:DateTimeOriginal", "EXIF:CreateDate", "QuickTime:CreateDate",
          "EXIF:Make", "EXIF:Model",
          "Composite:GPSLatitude", "Composite:GPSLongitude",
-         "Composite:Duration"]
+         "Composite:Duration",
+         "Composite:Aperture", "Composite:ShutterSpeed", "EXIF:ISO",
+         "EXIF:ExposureCompensation", "EXIF:FocalLength",
+         "EXIF:FocalLengthIn35mmFormat", "EXIF:MeteringMode", "EXIF:Flash"]
 
 
 class MetadataUnavailable(RuntimeError):
@@ -156,12 +168,13 @@ def extract(data: bytes, suffix: str = "") -> dict:
         tmp.write(data)
         tmp.flush()
         try:
-            # -n: numeric mode. Without it, exiftool print-converts several
-            # of the tags above for human display (most visibly Duration,
-            # which would otherwise come back as "0:00:12" instead of a
-            # plain number of seconds) — GPS/date tags are unaffected either
-            # way, exiftool already normalizes those regardless of -n.
-            results = helper.get_tags([tmp.name], tags=_TAGS, params=["-n"])
+            # No -n here: GPS/date tags are already normalized by exiftool
+            # regardless, Duration's own parser (below) already handles
+            # exiftool's print-converted format ("0:00:12") on its own, and
+            # the shooting-settings fields are much more useful in their
+            # print-converted human form ("Pattern", "Flash, compulsory")
+            # than as bare numeric codes.
+            results = helper.get_tags([tmp.name], tags=_TAGS)
         except Exception:
             return {}
 
@@ -177,4 +190,12 @@ def extract(data: bytes, suffix: str = "") -> dict:
         "latitude": raw.get("Composite:GPSLatitude"),
         "longitude": raw.get("Composite:GPSLongitude"),
         "duration_seconds": _parse_duration(raw.get("Composite:Duration")),
+        "aperture": raw.get("Composite:Aperture"),
+        "shutter_speed": raw.get("Composite:ShutterSpeed"),
+        "iso": raw.get("EXIF:ISO"),
+        "exposure_compensation": raw.get("EXIF:ExposureCompensation"),
+        "focal_length": raw.get("EXIF:FocalLength"),
+        "focal_length_35mm": raw.get("EXIF:FocalLengthIn35mmFormat"),
+        "metering_mode": raw.get("EXIF:MeteringMode"),
+        "flash": raw.get("EXIF:Flash"),
     }

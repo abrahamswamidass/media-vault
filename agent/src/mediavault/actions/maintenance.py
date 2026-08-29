@@ -283,6 +283,14 @@ class PublishAction(Action):
                     "latitude": exif.get("latitude"),
                     "longitude": exif.get("longitude"),
                     "duration_seconds": exif.get("duration_seconds"),
+                    "aperture": exif.get("aperture"),
+                    "shutter_speed": exif.get("shutter_speed"),
+                    "iso": exif.get("iso"),
+                    "exposure_compensation": exif.get("exposure_compensation"),
+                    "focal_length": exif.get("focal_length"),
+                    "focal_length_35mm": exif.get("focal_length_35mm"),
+                    "metering_mode": exif.get("metering_mode"),
+                    "flash": exif.get("flash"),
                     "person_ids": person_ids,
                 })
                 self.catalog.mark_published(self.source, item_id)

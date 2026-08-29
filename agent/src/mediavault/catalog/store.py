@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS items (
     latitude    REAL,
     longitude   REAL,
     duration_seconds REAL,
+    aperture    TEXT,
+    shutter_speed TEXT,
+    iso         TEXT,
+    exposure_compensation TEXT,
+    focal_length TEXT,
+    focal_length_35mm TEXT,
+    metering_mode TEXT,
+    flash       TEXT,
     PRIMARY KEY (source, item_id)
 );
 
@@ -138,6 +146,14 @@ class Catalog:
             "ALTER TABLE items ADD COLUMN latitude REAL",
             "ALTER TABLE items ADD COLUMN longitude REAL",
             "ALTER TABLE items ADD COLUMN duration_seconds REAL",
+            "ALTER TABLE items ADD COLUMN aperture TEXT",
+            "ALTER TABLE items ADD COLUMN shutter_speed TEXT",
+            "ALTER TABLE items ADD COLUMN iso TEXT",
+            "ALTER TABLE items ADD COLUMN exposure_compensation TEXT",
+            "ALTER TABLE items ADD COLUMN focal_length TEXT",
+            "ALTER TABLE items ADD COLUMN focal_length_35mm TEXT",
+            "ALTER TABLE items ADD COLUMN metering_mode TEXT",
+            "ALTER TABLE items ADD COLUMN flash TEXT",
         ):
             try:
                 self.conn.execute(ddl)
@@ -279,13 +295,20 @@ class Catalog:
             """
             UPDATE items SET width = ?, height = ?, date_taken = ?,
                              camera_make = ?, camera_model = ?,
-                             latitude = ?, longitude = ?, duration_seconds = ?
+                             latitude = ?, longitude = ?, duration_seconds = ?,
+                             aperture = ?, shutter_speed = ?, iso = ?,
+                             exposure_compensation = ?, focal_length = ?,
+                             focal_length_35mm = ?, metering_mode = ?, flash = ?
             WHERE source = ? AND item_id = ?
             """,
             (exif.get("width"), exif.get("height"), exif.get("date_taken"),
              exif.get("camera_make"), exif.get("camera_model"),
              exif.get("latitude"), exif.get("longitude"),
-             exif.get("duration_seconds"), source, item_id),
+             exif.get("duration_seconds"),
+             exif.get("aperture"), exif.get("shutter_speed"), exif.get("iso"),
+             exif.get("exposure_compensation"), exif.get("focal_length"),
+             exif.get("focal_length_35mm"), exif.get("metering_mode"),
+             exif.get("flash"), source, item_id),
         )
 
     def reset(self, source: str | None = None) -> dict:

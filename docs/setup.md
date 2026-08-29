@@ -209,13 +209,21 @@ extra setup. Without it, every HEIC would fail with an unhelpful "cannot
 identify image file" rather than publishing.
 
 Each item also gets EXIF pulled from a small header read (dimensions, camera
-make/model, real capture date, GPS coordinates, video duration where present)
-via the `exiftool`/PyExifTool already baked into the image — no extra setup
-needed. It's best-effort: files with no EXIF (screenshots, some exports), no
-GPS block (most photos — screenshots, edited exports, cameras with location
+make/model, real capture date, GPS coordinates, video duration, and shooting
+settings — aperture, shutter speed, ISO, exposure compensation, focal length
+(plus 35mm-equivalent), metering mode, flash — where present) via the
+`exiftool`/PyExifTool already baked into the image — no extra setup needed.
+It's best-effort: files with no EXIF (screenshots, some exports), no GPS
+block (most photos — screenshots, edited exports, cameras with location
 off), or a missing PyExifTool install just leave those fields empty rather
 than failing the item. `doctor` reports whether PyExifTool is available under
 "Tooling".
+
+**Shooting settings are deliberately kept as exiftool's own print-converted
+strings**, not raw numeric codes — e.g. metering mode comes back as
+`"Pattern"` and flash as `"Flash, compulsory"`, not the bare EXIF integers
+those map from. That's why `extract()` never passes exiftool's `-n` (numeric
+mode) flag.
 
 **The capture date tries three EXIF sources before giving up**:
 `DateTimeOriginal`, then `CreateDate`, then (for video) `QuickTime:CreateDate`
