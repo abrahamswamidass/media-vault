@@ -26,6 +26,8 @@ import argparse
 import json
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from .catalog import Catalog, dedup as dedup_mod, scanner
@@ -508,12 +510,47 @@ def cmd_amazon_stage(args) -> int:
 # --------------------------------------------------------------------------- #
 # process-intents
 # --------------------------------------------------------------------------- #
-def cmd_process_intents(args) -> int:
+def _process_intents_once(args, intents_store, catalog) -> tuple[int, int]:
+    """One claim/run/write-back pass. Returns (done, failed)."""
     from . import sync as sync_mod
 
+    ctx = sync_mod.AgentContext(
+        connectors=_LazyConnectors(), blobs=_blobs_for(args),
+        catalog=catalog, facts=_facts_for(args))
+
+    claimed = intents_store.claim_pending(limit=args.limit)
+    if not claimed:
+        print("No pending intents.")
+        return 0, 0
+
+    log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+    done = failed = 0
+    for raw in claimed:
+        intent = sync_mod.Intent(**raw)
+        print(f"{intent.type} {intent.item_id} ...", flush=True)
+        try:
+            result = log.record(sync_mod.handle(intent, ctx, commit=True))
+        except Exception as e:
+            failed += 1
+            intents_store.fail(intent.id, {"error": f"{type(e).__name__}: {e}"})
+            print(f"  crashed: {e}")
+            continue
+        if result.ok:
+            done += 1
+            intents_store.complete(intent.id, result.to_dict())
+        else:
+            failed += 1
+            intents_store.fail(intent.id, result.to_dict())
+        print(f"  {result.status}: {result.detail}")
+
+    print(f"{done} done, {failed} failed.")
+    return done, failed
+
+
+def cmd_process_intents(args) -> int:
     intents_store = _intents_for(args)
 
-    if not args.commit:
+    if not args.commit and not args.watch:
         pending = intents_store.peek_pending(limit=args.limit)
         if not pending:
             print("No pending intents.")
@@ -525,37 +562,24 @@ def cmd_process_intents(args) -> int:
         return 0
 
     with _catalog(args) as catalog:
-        ctx = sync_mod.AgentContext(
-            connectors=_LazyConnectors(), blobs=_blobs_for(args),
-            catalog=catalog, facts=_facts_for(args))
+        if not args.watch:
+            _, failed = _process_intents_once(args, intents_store, catalog)
+            return 0 if failed == 0 else 1
 
-        claimed = intents_store.claim_pending(limit=args.limit)
-        if not claimed:
-            print("No pending intents.")
+        # --watch: poll forever until Ctrl+C. Run this in the foreground
+        # (`docker exec -it ...`) -- without -it, SIGINT never reaches the
+        # process inside the container and it keeps polling as an orphan,
+        # the same trap a stray `dedup --commit` fell into before.
+        print(f"Watching for intents every {args.interval}s. Ctrl+C to stop.")
+        try:
+            while True:
+                stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                print(f"\n[{stamp}] polling...", flush=True)
+                _process_intents_once(args, intents_store, catalog)
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nStopped.")
             return 0
-
-        log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
-        done = failed = 0
-        for raw in claimed:
-            intent = sync_mod.Intent(**raw)
-            print(f"{intent.type} {intent.item_id} ...", flush=True)
-            try:
-                result = log.record(sync_mod.handle(intent, ctx, commit=True))
-            except Exception as e:
-                failed += 1
-                intents_store.fail(intent.id, {"error": f"{type(e).__name__}: {e}"})
-                print(f"  crashed: {e}")
-                continue
-            if result.ok:
-                done += 1
-                intents_store.complete(intent.id, result.to_dict())
-            else:
-                failed += 1
-                intents_store.fail(intent.id, result.to_dict())
-            print(f"  {result.status}: {result.detail}")
-
-        print(f"\n{done} done, {failed} failed.")
-        return 0 if failed == 0 else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -845,6 +869,11 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--limit", type=int, default=10, help="claim at most this many intents")
     pi.add_argument("--commit", action="store_true",
                     help="ACTUALLY claim and run them (default: preview only)")
+    pi.add_argument("--watch", action="store_true",
+                    help="keep running, polling Firestore every --interval seconds "
+                         "instead of a single pass (implies --commit; Ctrl+C to stop)")
+    pi.add_argument("--interval", type=int, default=600,
+                    help="seconds between polls in --watch mode (default 600 = 10 min)")
     pi.set_defaults(_fn=cmd_process_intents)
 
     # -- connectors --

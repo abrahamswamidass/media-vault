@@ -108,7 +108,8 @@ after it (and the sections further down) explain the *why* behind each one.
 | `dedup drive [--commit]` | Preview / archive Drive duplicates — same flags as `dedup nas` (`--by-folder`, `--debug`, `--max-groups`, ...). |
 | `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
 | `process-intents` | Preview what the web module has requested — read-only, claims/runs nothing. |
-| `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. See [Web viewer](#web-viewer). |
+| `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. One pass. See [Web viewer](#web-viewer). |
+| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds — run with `docker exec -it` so Ctrl+C actually stops it. |
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 
@@ -511,10 +512,26 @@ agent has to actually pick it up:
 ```powershell
 docker exec media-vault-container python -m mediavault.cli process-intents --commit
 ```
-Run that whenever, or put it on the same schedule as `index`/`publish` if you
-want staging to happen automatically. The **Amazon** tab is read-only — it
-lists what's been requested and its current status (waiting / working /
-staged / failed), not a picker of its own.
+That's a single pass — run it whenever, or put it on the same schedule as
+`index`/`publish`.
+
+**To pick up requests automatically without a manual run each time, use
+`--watch`** — it polls Firestore every `--interval` seconds (default 600 = 10
+min) instead of exiting after one pass. Each poll is one small Firestore
+query, so even at a 10-minute interval this is nowhere near Firestore's free
+read quota — effectively $0/month regardless of how long it runs:
+```powershell
+docker exec -it media-vault-container python -m mediavault.cli process-intents --watch --interval 600
+```
+**The `-it` matters.** Without it, Ctrl+C only kills the local `docker exec`
+client, not the polling loop inside the container — it silently keeps running
+as an orphaned background process, exactly the trap a stray `dedup --commit`
+fell into once already (see the dedup section above). With `-it`, Ctrl+C
+reaches the process directly and it stops cleanly, no orphan left behind.
+
+The **Amazon** tab is read-only — it lists what's been requested and its
+current status (waiting / working / staged / failed), not a picker of its
+own.
 
 **Add it to your phone's home screen** for a proper app-like icon —
 `manifest.json` and the `apple-touch-icon` are already wired in. On iOS:
