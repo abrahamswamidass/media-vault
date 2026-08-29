@@ -500,6 +500,15 @@ nav a.active {
   display: none;
 }
 
+.person-label {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.75rem;
+  color: #ddd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .amazon-list {
   display: flex;
   flex-direction: column;

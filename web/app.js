@@ -11,11 +11,12 @@ import * as agentHeartbeat from "./agentHeartbeat.js";
 import * as browseView from "./views/browse.js";
 import * as mapView from "./views/map.js";
 import * as foldersView from "./views/folders.js";
+import * as peopleView from "./views/people.js";
 import * as duplicatesView from "./views/duplicates.js";
 import * as amazonView from "./views/amazon.js";
 
 const VIEWS = {
-  browse: browseView, map: mapView, folders: foldersView,
+  browse: browseView, map: mapView, folders: foldersView, people: peopleView,
   duplicates: duplicatesView, amazon: amazonView,
 };
 const DEFAULT_VIEW = "browse";

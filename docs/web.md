@@ -14,14 +14,32 @@ The nav groups three ways to look at the same library, left of a divider:
 **Browse** (chronological, the default), **Map** (every geotagged item pinned
 on a Leaflet/OpenStreetMap map — no API key, no cost, loaded from a CDN only
 when that tab is opened; most photos have no GPS at all, so an empty or
-sparse map is normal, not a sign anything's broken), and **Folders** (drills
+sparse map is normal, not a sign anything's broken), **Folders** (drills
 into the same NAS folder structure the agent indexed — Firestore has no real
 hierarchy, so "folders" are computed on the fly from item_id path segments as
 each page loads, the same client-side, paginated approach Browse uses for
-"Load more"). Right of the divider: **Duplicates** (stub) and **Amazon**
-(read-only staging status) — maintenance/status tools, not library views.
-Clicking a photo in Browse or Folders opens the same modal (they share one
-instance — see `CLAUDE.md`'s web/ section).
+"Load more"), and **People** (see below). Right of the divider: **Duplicates**
+(stub) and **Amazon** (read-only staging status) — maintenance/status tools,
+not library views. Clicking a photo in Browse, Folders, or People opens the
+same modal (they share one instance — see `CLAUDE.md`'s web/ section).
+
+## People
+
+Groups published items by the `person_ids` array `publish` already writes
+when `FACES_LIVE=1` was on (see [agent.md](agent.md#face-detection-optional-agent-side-only-for-now)) —
+click a person's cover tile to see every photo they appear in. Firestore has
+no way to ask "items where this array isn't empty," so this scans a bounded
+window of the most recent 5000 items (by `mtime`, same as Browse) and
+buckets by person id entirely client-side — a person whose only appearances
+fall outside that window won't show up, which is fine at personal-library
+scale but worth knowing if it looks incomplete on a very large library.
+
+**View-only, deliberately** — there's no way to name someone from the
+browser yet. Naming today only exists as `people-rename` on the CLI, which
+writes to the local SQLite catalog, not Firestore, so a name given that way
+doesn't reach this tab at all. Bridging that gap (letting a name entered
+here, or given via the CLI, show up consistently in both places) is tracked
+as a separate issue rather than folded into this view.
 
 ## Hiding a folder
 

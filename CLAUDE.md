@@ -37,17 +37,24 @@ agent/           Module 1 — local Python. The only thing that touches files.
 web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  (no build step) — a placeholder MVP, not the eventual React
                  app. app.js is a sign-in gate + hash router; each tab is a
-                 view module (views/browse.js, map.js, folders.js,
+                 view module (views/browse.js, map.js, folders.js, people.js,
                  duplicates.js, amazon.js) exporting mount()/unmount(). Nav is
-                 grouped: Browse/Map/Folders (three ways to look at the same
-                 library — by date, by location, by NAS folder structure) sit
-                 left of a divider; Duplicates/Amazon (maintenance/status
-                 tools, not library views) sit right of it. Browse
-                 (chronological grid, paginated), Map (geotagged items on a
-                 Leaflet/OSM map), Folders (drills into item_id path
-                 segments — Firestore has no real hierarchy, so this is
-                 computed client-side, paginated the same way Browse is), and
-                 Amazon (read-only status of staged intents) are functional;
+                 grouped: Browse/Map/Folders/People (four ways to look at the
+                 same library — by date, by location, by NAS folder
+                 structure, by detected face) sit left of a divider;
+                 Duplicates/Amazon (maintenance/status tools, not library
+                 views) sit right of it. Browse (chronological grid,
+                 paginated), Map (geotagged items on a Leaflet/OSM map),
+                 Folders (drills into item_id path segments — Firestore has
+                 no real hierarchy, so this is computed client-side,
+                 paginated the same way Browse is), People (groups items by
+                 the person_ids array publish already writes — client-side
+                 aggregation over a bounded recent-items scan, same shape as
+                 Folders, since Firestore can't query "array length > 0"
+                 directly; view-only, no naming from the browser yet — that
+                 stays a `people-rename` CLI-only step until names have a
+                 Firestore home, see the tracking issue), and Amazon
+                 (read-only status of staged intents) are functional;
                  duplicates is a stub — see its file comment for what's
                  blocking it. Folders can hide a folder (a checkbox per
                  tile) — a pure display preference written straight to
