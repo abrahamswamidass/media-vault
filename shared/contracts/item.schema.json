@@ -53,6 +53,10 @@
       "type": ["number", "null"], "minimum": 0,
       "description": "Video length, where present. Best-effort within the same head-read budget as the rest of this item's EXIF — a video whose duration atom wasn't in that window (common for large, non-\"fast start\" files) comes back null, not an error."
     },
+    "person_ids": {
+      "type": "array", "items": { "type": "string" },
+      "description": "Ids into the people collection, one per distinct face-cluster detected in this item (photos only). Opaque ids only -- no face embeddings or bounding boxes are ever published here; those stay in the agent's local catalog. Empty unless FACES_LIVE was on when this item was published."
+    },
     "indexed_at": {
       "type": "string",
       "format": "date-time",

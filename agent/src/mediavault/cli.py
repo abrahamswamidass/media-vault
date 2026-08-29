@@ -403,6 +403,33 @@ def cmd_stats(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# people
+# --------------------------------------------------------------------------- #
+def cmd_people(args) -> int:
+    with _catalog(args) as catalog:
+        people = catalog.list_people()
+        if args.json:
+            _emit([dict(p) for p in people], True)
+            return 0
+        if not people:
+            print("No people yet. Run: mediavault publish nas --commit (with FACES_LIVE=1)")
+            return 0
+        print(f"{'id':>4}  {'name':20} {'faces':>7} {'photos':>7}  sample item")
+        for p in people:
+            name = p["name"] or "(unnamed)"
+            print(f"{p['id']:>4}  {name:20} {p['face_count']:>7} "
+                  f"{p['item_count']:>7}  {p['sample_item_id']}")
+        return 0
+
+
+def cmd_people_rename(args) -> int:
+    with _catalog(args) as catalog:
+        catalog.set_person_name(args.person_id, args.name)
+    print(f"Person {args.person_id} -> {args.name!r}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # reset
 # --------------------------------------------------------------------------- #
 def cmd_reset(args) -> int:
@@ -719,6 +746,29 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("stats", help="what the catalog currently knows")
     s.add_argument("--db", help="catalog database path")
     s.set_defaults(_fn=cmd_stats)
+
+    # -- people --
+    pe = sub.add_parser(
+        "people",
+        help="list detected face clusters — local catalog only, no Firestore",
+        description="Every person (face cluster) publish has found so far, with a "
+                    "face/photo count and one sample item to eyeball. Needs "
+                    "FACES_LIVE=1 during publish to have found anything at all. "
+                    "Read-only, local-catalog only — this is for sanity-checking "
+                    "clustering quality, not the eventual web 'People' tab.")
+    pe.add_argument("--db", help="catalog database path")
+    pe.set_defaults(_fn=cmd_people)
+
+    per = sub.add_parser(
+        "people-rename",
+        help="name a person (local catalog only, no Firestore)",
+        description="Sets a person's name in the local catalog. Does not (yet) push "
+                    "anything to Firestore — there's no people/ collection for the web "
+                    "module to read a name from yet, this is local-only for now.")
+    per.add_argument("person_id", type=int)
+    per.add_argument("name")
+    per.add_argument("--db", help="catalog database path")
+    per.set_defaults(_fn=cmd_people_rename)
 
     # -- reset --
     rs = sub.add_parser(

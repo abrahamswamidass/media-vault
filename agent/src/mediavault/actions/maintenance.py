@@ -11,12 +11,13 @@ the web module leaves exactly the record a publish run typed at the terminal doe
 """
 from __future__ import annotations
 
+import os
 from pathlib import PurePosixPath
 from typing import Optional
 
-from .. import metadata
+from .. import faces, metadata
 from ..blobstore import blob_key
-from ..catalog import dedup as dedup_mod, scanner
+from ..catalog import assign_person, dedup as dedup_mod, scanner
 from ..catalog.store import Catalog
 from ..ports import BlobStore, Connector, FactsStore
 from .base import Action, NoOp
@@ -240,6 +241,36 @@ class PublishAction(Action):
                 if exif:
                     self.catalog.set_exif(self.source, item_id, exif)
 
+                # Faces, like EXIF, are a bonus — never block publishing.
+                # Gated behind FACES_LIVE (off by default, like every other
+                # live switch here) since the first real run needs to
+                # download model weights and costs real CPU time per image.
+                # Images only: insightface can't do anything useful with a
+                # video frame, and this needs the FULL file (unlike EXIF's
+                # bounded head read) since a face model has to decode the
+                # whole image, not peek at its header.
+                #
+                # Idempotent per item: without this check, a `--force`
+                # re-run (e.g. to backfill GPS on already-published items)
+                # would re-detect every face on every republished item,
+                # duplicating rows in `faces` and re-paying the compute cost
+                # for nothing new.
+                existing = self.catalog.faces_for_item(self.source, item_id)
+                person_ids: list[str] = sorted({
+                    str(f["person_id"]) for f in existing if f["person_id"] is not None})
+                mime = row["mime"] or ""
+                if not existing and os.getenv("FACES_LIVE", "0") == "1" and mime.startswith("image/"):
+                    try:
+                        full = self.connector.read(item_id)
+                        for face in faces.detect_faces(full):
+                            person_id = assign_person(self.catalog, face["embedding"])
+                            self.catalog.add_face(
+                                self.source, item_id, face["bbox"], face["score"],
+                                face["embedding"], person_id)
+                            person_ids.append(str(person_id))
+                    except Exception:
+                        person_ids = []
+
                 self.facts.put(self.source, item_id, {
                     "source": self.source, "item_id": item_id, "name": row["name"],
                     "size": row["size"], "mtime": row["mtime"], "mime": row["mime"],
@@ -252,6 +283,7 @@ class PublishAction(Action):
                     "latitude": exif.get("latitude"),
                     "longitude": exif.get("longitude"),
                     "duration_seconds": exif.get("duration_seconds"),
+                    "person_ids": person_ids,
                 })
                 self.catalog.mark_published(self.source, item_id)
                 published.append(item_id)

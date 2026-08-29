@@ -109,6 +109,8 @@ after it (and the sections further down) explain the *why* behind each one.
 | `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
 | `process-intents` | Preview what the web module has requested — read-only, claims/runs nothing. |
 | `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. See [Web viewer](#web-viewer). |
+| `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
+| `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
@@ -385,6 +387,49 @@ A synced Drive folder mounted as a local path (e.g. `G:\`) is a different,
 simpler option if you'd rather point the *mount-based* connector at it
 instead of using the API — but it only sees whatever your Drive desktop app
 has synced locally, not your whole Drive.
+
+## Face detection (optional, agent-side only for now)
+
+Detects faces during `publish` and clusters them — "recognize people" here
+means grouping photos of the same unlabeled person together, not identifying
+anyone by name out of the box; there's no model that already knows your
+family. `insightface` (ONNX-based, no C++ toolchain needed) is baked into
+the image already. Set the live switch to turn it on:
+
+```powershell
+  -e FACES_LIVE=1 `
+```
+
+**The first real run needs internet access once**, to download model weights
+(a few hundred MB, cached under `~/.insightface` inside the container after
+that). It also costs real CPU time per photo — expect a `publish` run to
+take noticeably longer with this on than without it.
+
+It runs on the same full-resolution read `publish` already does for
+thumbnailing — no extra NAS traffic. Video files are skipped (needs an
+actual `mime` starting `image/`, so run `index nas` at least once after
+upgrading to this version — see the MIME note above). Detection is
+idempotent per item: a `--force` re-run to backfill an unrelated field
+(e.g. GPS) won't re-detect faces or duplicate rows for an item that's
+already been through it once.
+
+**What's stored where** — deliberately split, for privacy as much as
+architecture:
+
+```powershell
+docker exec media-vault-container python -m mediavault.cli people
+docker exec media-vault-container python -m mediavault.cli people-rename 3 "Mom"
+```
+
+Face bounding boxes and the actual embedding vectors never leave the local
+SQLite catalog — `people`/`people-rename` above are local-catalog-only, no
+Firestore involved. Firestore only ever sees an opaque `person_ids` array on
+each published item (see `item.schema.json`) — no biometric data in the
+cloud database. **There's no `people/` Firestore collection yet** — that's
+the piece a future "People" web tab would need (names, a cover photo per
+person) and it's deliberately not built yet; `person_ids` on published items
+is forward-compatible plumbing for it, not a complete feature on its own
+today.
 
 ## Cloud mirror (optional)
 

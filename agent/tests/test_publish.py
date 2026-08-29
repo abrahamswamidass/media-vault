@@ -326,3 +326,107 @@ def test_cli_prints_the_actual_reason_for_a_partial_failure(tmp_path, capsys):
     assert "1 item(s) failed:" in out
     assert "Photos/vanishes.jpg" in out
     assert "not found" in out.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Face detection (FACES_LIVE) — gated, best-effort, and must be idempotent
+# per item so a --force re-run (e.g. to backfill GPS) doesn't re-detect
+# every face and duplicate rows in the local faces table.
+# --------------------------------------------------------------------------- #
+class _FakeDetectedFace:
+    def __init__(self, bbox, embedding, score):
+        self.bbox = bbox
+        self.embedding = embedding
+        self.det_score = score
+
+
+@pytest.fixture
+def fake_insightface(monkeypatch):
+    from mediavault import faces as faces_mod
+
+    state = {"faces": [], "calls": 0}
+
+    class FakeFaceAnalysis:
+        def __init__(self, name=None, providers=None):
+            pass
+
+        def prepare(self, ctx_id, det_size):
+            pass
+
+        def get(self, img):
+            state["calls"] += 1
+            return state["faces"]
+
+    fake_app_module = types.SimpleNamespace(FaceAnalysis=FakeFaceAnalysis)
+    monkeypatch.setitem(sys.modules, "insightface", types.SimpleNamespace(app=fake_app_module))
+    monkeypatch.setitem(sys.modules, "insightface.app", fake_app_module)
+    monkeypatch.setattr(faces_mod, "_app", None)
+    return state
+
+
+def test_faces_live_off_by_default_detects_nothing(nas, catalog, blobs, facts,
+                                                    fake_insightface, monkeypatch):
+    import numpy as np
+    monkeypatch.delenv("FACES_LIVE", raising=False)
+    fake_insightface["faces"] = [_FakeDetectedFace(
+        (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.9)]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert fake_insightface["calls"] == 0
+    assert catalog.faces_for_item("nas", "Photos/real.jpg") == []
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert '"person_ids": []' in fact_file.read_text()
+
+
+def test_faces_live_detects_and_assigns_a_person(nas, catalog, blobs, facts,
+                                                  fake_insightface, monkeypatch):
+    import numpy as np
+    monkeypatch.setenv("FACES_LIVE", "1")
+    fake_insightface["faces"] = [_FakeDetectedFace(
+        (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.9)]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert fake_insightface["calls"] == 1
+    saved_faces = catalog.faces_for_item("nas", "Photos/real.jpg")
+    assert len(saved_faces) == 1
+    person_id = saved_faces[0]["person_id"]
+    assert person_id is not None
+
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert f'"{person_id}"' in fact_file.read_text()
+
+
+def test_faces_live_skips_non_image_items(nas, catalog, blobs, facts,
+                                          fake_insightface, monkeypatch):
+    import numpy as np
+    monkeypatch.setenv("FACES_LIVE", "1")
+    fake_insightface["faces"] = [_FakeDetectedFace(
+        (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.9)]
+    (nas / "clip.mov").write_bytes(b"not really a video, just needs a mov extension")
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert catalog.faces_for_item("nas", "clip.mov") == []
+
+
+def test_face_detection_is_idempotent_on_force_republish(nas, catalog, blobs, facts,
+                                                          fake_insightface, monkeypatch):
+    import numpy as np
+    monkeypatch.setenv("FACES_LIVE", "1")
+    fake_insightface["faces"] = [_FakeDetectedFace(
+        (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.9)]
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    assert fake_insightface["calls"] == 1
+
+    # A --force republish (e.g. to backfill an unrelated field like GPS)
+    # must not re-run detection or duplicate the face row it already has.
+    PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
+
+    assert fake_insightface["calls"] == 1  # not called again
+    assert len(catalog.faces_for_item("nas", "Photos/real.jpg")) == 1  # not duplicated

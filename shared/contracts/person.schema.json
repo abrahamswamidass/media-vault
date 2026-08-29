@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-vault.local/contracts/person.schema.json",
+  "title": "Person",
+  "description": "One face cluster. Written only by the agent (catalog/people.py assigns faces to a person; nothing here ever picks a name — that's a person doing it once, through whatever UI reads/updates this). No face embeddings or bounding boxes ever appear here or anywhere in Firestore; those stay local to the agent's SQLite catalog. This document's id is what item.person_ids references.",
+  "type": "object",
+  "required": ["id", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The local catalog's `people.id`, as a string. Referenced by item.person_ids."
+    },
+    "name": {
+      "type": ["string", "null"],
+      "description": "Null until someone labels this cluster. An unnamed person is still a real, usable cluster — 'the person in these 40 photos', just without a name attached yet."
+    },
+    "face_count": {
+      "type": "integer", "minimum": 1,
+      "description": "How many detected faces belong to this person, across the whole library."
+    },
+    "cover_thumbnail_key": {
+      "type": ["string", "null"],
+      "description": "Blob key of one representative photo's thumbnail (their first detected face), for a 'People' picker UI to show without an extra query."
+    },
+    "created_at": {
+      "type": "string", "format": "date-time",
+      "description": "When this person (cluster) was first created — i.e. when their first face didn't match anyone existing."
+    }
+  }
+}

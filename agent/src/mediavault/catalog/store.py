@@ -60,6 +60,38 @@ CREATE TABLE IF NOT EXISTS scans (
     items_seen  INTEGER NOT NULL DEFAULT 0,
     complete    INTEGER NOT NULL DEFAULT 0
 );
+
+-- A person is a cluster of faces believed to be the same individual.
+-- Unnamed (name IS NULL) until labeled — clustering itself never assigns a
+-- name, only groups faces together for a person to do that once. Declared
+-- before faces (below), which references it.
+CREATE TABLE IF NOT EXISTS people (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT,
+    created_at  TEXT NOT NULL
+);
+
+-- One row per detected face. Embeddings never leave this local database —
+-- only the (opaque) person_id they resolve to gets published to Firestore,
+-- see PublishAction. person_id is NULL only transiently, between insert and
+-- the clustering step that assigns it; nothing in this project leaves it
+-- unset on purpose.
+CREATE TABLE IF NOT EXISTS faces (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    item_id     TEXT NOT NULL,
+    bbox_x1     REAL NOT NULL,
+    bbox_y1     REAL NOT NULL,
+    bbox_x2     REAL NOT NULL,
+    bbox_y2     REAL NOT NULL,
+    score       REAL,
+    embedding   BLOB NOT NULL,
+    person_id   INTEGER REFERENCES people(id),
+    detected_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_faces_item ON faces (source, item_id);
+CREATE INDEX IF NOT EXISTS idx_faces_person ON faces (person_id);
 """
 
 
@@ -159,6 +191,71 @@ class Catalog:
             "UPDATE items SET full_hash = ? WHERE source = ? AND item_id = ?",
             (full_hash, source, item_id),
         )
+
+    # --- faces / people ----------------------------------------------------#
+    def add_person(self) -> int:
+        """Start a new, unnamed person — a face didn't match anyone existing
+        closely enough (see catalog/people.py's clustering)."""
+        cur = self.conn.execute(
+            "INSERT INTO people (name, created_at) VALUES (NULL, ?)", (_now(),))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def set_person_name(self, person_id: int, name: str) -> None:
+        self.conn.execute("UPDATE people SET name = ? WHERE id = ?", (name, person_id))
+        self.conn.commit()
+
+    def add_face(self, source: str, item_id: str, bbox: tuple[float, float, float, float],
+                score: Optional[float], embedding: bytes, person_id: int) -> int:
+        cur = self.conn.execute(
+            """
+            INSERT INTO faces (source, item_id, bbox_x1, bbox_y1, bbox_x2, bbox_y2,
+                               score, embedding, person_id, detected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (source, item_id, *bbox, score, embedding, person_id, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def person_centroids(self) -> list[sqlite3.Row]:
+        """One representative embedding per known person — their first-ever
+        detected face, used as the comparison point when matching a new one.
+        Simple and deterministic rather than averaging embeddings across
+        every face a person has, which would need re-averaging on every
+        insert for a benefit that hasn't proven necessary."""
+        return self.conn.execute(
+            """
+            SELECT f.person_id AS person_id, f.embedding AS embedding
+            FROM faces f
+            JOIN (SELECT person_id, MIN(id) AS first_id FROM faces
+                  WHERE person_id IS NOT NULL GROUP BY person_id) first
+              ON f.id = first.first_id
+            """
+        ).fetchall()
+
+    def faces_for_item(self, source: str, item_id: str) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM faces WHERE source = ? AND item_id = ?",
+            (source, item_id),
+        ).fetchall()
+
+    def list_people(self) -> list[sqlite3.Row]:
+        """Every person, with how many faces/distinct items they appear in
+        and one sample item to look at (their first-ever detected face) —
+        enough to sanity-check clustering quality from the CLI without
+        needing the eventual web "People" tab."""
+        return self.conn.execute(
+            """
+            SELECT p.id AS id, p.name AS name, p.created_at AS created_at,
+                   COUNT(f.id) AS face_count,
+                   COUNT(DISTINCT f.item_id) AS item_count,
+                   MIN(f.item_id) AS sample_item_id
+            FROM people p JOIN faces f ON f.person_id = p.id
+            GROUP BY p.id
+            ORDER BY face_count DESC
+            """
+        ).fetchall()
 
     def mark_archived(self, source: str, item_id: str) -> None:
         """Flag an item as archived. The row stays so the change is visible."""

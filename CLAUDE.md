@@ -24,7 +24,11 @@ agent/           Module 1 — local Python. The only thing that touches files.
     connectors/    one adapter per source: nas, drive, archive, amazon
     blobstore.py   blob adapters: LocalBlobStore (tests), GCSBlobStore (real)
     imaging.py     the one place that decodes a photo
-    catalog/       SQLite index: store, resumable scanner, dedup engine
+    metadata.py    the one place that reads EXIF (date, camera, GPS, video duration)
+    faces.py       the one place that runs the face model (FACES_LIVE=1)
+    catalog/       SQLite index: store, resumable scanner, dedup engine,
+                   people.py (face clustering — embeddings stay local, only
+                   an opaque person_id ever reaches Firestore)
     actions/       every mutation, as a Command object
     sync/          intents in, facts out
     doctor.py      preflight config check
@@ -79,8 +83,14 @@ is a circular import — that already happened once.
 - **Stdlib-only core.** Connectors, actions, and CLI import nothing outside the
   standard library. Pillow, Google clients, and exiftool are optional extras, each
   gated behind an explicit import or env flag.
-- **Live switches default off.** `DRIVE_LIVE=0`, `GCS_LIVE=0`. A half-configured
-  machine cannot reach a cloud API.
+- **Live switches default off.** `DRIVE_LIVE=0`, `GCS_LIVE=0`, `FACES_LIVE=0`. A
+  half-configured machine cannot reach a cloud API (or, for faces, silently start
+  a multi-hour detection pass).
+- **Face embeddings never leave the agent.** Face clustering (`catalog/people.py`)
+  stores bounding boxes and raw embedding vectors only in the local SQLite
+  catalog; Firestore only ever sees an opaque `person_ids` array per item. No
+  biometric data reaches the cloud, by construction, not by a rule someone has
+  to remember to follow.
 
 ## Deduplication rules — do not relax these
 

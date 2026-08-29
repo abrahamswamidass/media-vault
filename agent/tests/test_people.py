@@ -1,0 +1,63 @@
+"""
+Face clustering tests — catalog/people.py's assign_person(). Pure logic
+against a real (temp-file) Catalog; no model, no insightface needed here —
+that's faces.py's job, tested separately in test_faces.py.
+"""
+from __future__ import annotations
+
+import struct
+
+import pytest
+
+from mediavault.catalog import Catalog, assign_person
+
+
+def _embedding(*values: float) -> bytes:
+    return struct.pack(f"{len(values)}f", *values)
+
+
+@pytest.fixture
+def catalog(tmp_path):
+    with Catalog(str(tmp_path / "cat.sqlite")) as c:
+        yield c
+
+
+def test_first_face_ever_creates_a_new_person(catalog):
+    person_id = assign_person(catalog, _embedding(1.0, 0.0, 0.0))
+
+    assert person_id is not None
+    people = catalog.list_people()
+    assert people == []  # not a real person until a face row references them
+
+
+def test_a_close_embedding_matches_the_existing_person(catalog):
+    first = assign_person(catalog, _embedding(1.0, 0.0, 0.0))
+    catalog.add_face("nas", "a.jpg", (0, 0, 10, 10), 0.9, _embedding(1.0, 0.0, 0.0), first)
+
+    second = assign_person(catalog, _embedding(1.01, 0.0, 0.0))  # tiny difference
+
+    assert second == first
+
+
+def test_a_far_embedding_creates_a_new_person(catalog):
+    first = assign_person(catalog, _embedding(1.0, 0.0, 0.0))
+    catalog.add_face("nas", "a.jpg", (0, 0, 10, 10), 0.9, _embedding(1.0, 0.0, 0.0), first)
+
+    second = assign_person(catalog, _embedding(-1.0, 0.0, 0.0))  # opposite vector
+
+    assert second != first
+
+
+def test_matching_uses_each_persons_first_face_not_the_most_recent(catalog):
+    """Centroid = first-ever face, deliberately not recomputed as more faces
+    are added — a later, slightly different face shouldn't change who a new
+    face gets compared against."""
+    p1 = assign_person(catalog, _embedding(1.0, 0.0, 0.0))
+    catalog.add_face("nas", "a.jpg", (0, 0, 10, 10), 0.9, _embedding(1.0, 0.0, 0.0), p1)
+    # A second, slightly different face for the same person — shouldn't
+    # become the new comparison point.
+    catalog.add_face("nas", "b.jpg", (0, 0, 10, 10), 0.9, _embedding(0.5, 0.5, 0.0), p1)
+
+    matched = assign_person(catalog, _embedding(1.0, 0.0, 0.0))
+
+    assert matched == p1

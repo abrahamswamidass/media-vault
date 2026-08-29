@@ -19,6 +19,13 @@ ImageHash>=4.3.1
 # automatically the first time it touches Pillow; nothing else to configure.
 pillow-heif>=0.15.0
 
+# --- Face detection/clustering (set FACES_LIVE=1 to use) --------------------
+# ONNX-based, not dlib — no C++ toolchain needed in this slim Docker image.
+# First real run downloads model weights (a few hundred MB, cached after
+# that under ~/.insightface) — needs real internet access once.
+insightface>=0.7.3
+onnxruntime>=1.16.0
+
 # --- Google Drive live connector (set DRIVE_LIVE=1 to use) ------------------
 google-api-python-client>=2.100.0
 google-auth-oauthlib>=1.2.0
