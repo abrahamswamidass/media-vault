@@ -221,6 +221,25 @@ def test_without_force_rerun_still_ignores_already_published_items(nas, catalog,
     assert result.status == STATUS_NOOP
 
 
+def test_mime_only_skips_items_with_no_mime(nas, catalog, blobs, facts):
+    """Simulates a partially re-indexed library: some rows still have no
+    mime (indexed before mime detection was added), others already do —
+    --mime-only must target only the ones a fresh index pass has reached."""
+    (nas / "Photos" / "no_mime.jpg").write_bytes(_jpeg_bytes(color=(9, 9, 9)))
+    conn = _indexed(nas, catalog)
+    catalog.conn.execute(
+        "UPDATE items SET mime = NULL WHERE source = 'nas' AND item_id = 'Photos/no_mime.jpg'"
+    )
+    catalog.conn.commit()
+
+    result = PublishAction("nas", conn, catalog, blobs, facts, mime_only=True).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1
+    assert catalog.get("nas", "Photos/real.jpg")["published_at"] is not None
+    assert catalog.get("nas", "Photos/no_mime.jpg")["published_at"] is None
+
+
 def test_thumbnail_key_is_content_addressed_not_path_addressed(nas, catalog, blobs, facts, tmp_path):
     """Two different filenames with identical bytes share one thumbnail blob."""
     (nas / "Photos" / "dup.jpg").write_bytes((nas / "Photos" / "real.jpg").read_bytes())

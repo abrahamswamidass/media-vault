@@ -20,6 +20,7 @@ what each command actually touches.
 | `publish nas` | Preview pushing thumbnails + metadata for unpublished items. |
 | `publish nas --commit` | Actually push them (local files without `GCS_LIVE=1`, real GCS/Firestore with it). |
 | `publish nas --force --commit` | Also republish already-published items — backfills a fact field (e.g. GPS) added after they were first published, no reset/re-index needed. |
+| `publish nas --mime-only --commit` | Only items with `mime` already set — for a library only partially re-indexed since mime detection was added (see below), so `--max-items` targets what's actually been re-indexed instead of the oldest-indexed items with none. |
 | `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
 | `reset --all --commit` | Same, for every source. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
@@ -198,10 +199,21 @@ was added stays stuck with no MIME type until it's indexed again:
 docker exec media-vault-container python -m mediavault.cli index nas
 ```
 A plain re-run like this is safe and only touches what's actually still
-missing — it re-walks the tree (fast, thanks to the `scandir()` fix above),
-and `catalog.upsert()` overwrites each row's metadata regardless of whether
-anything changed, so `mime` fills in for everything without needing a
-`reset` first.
+missing — it re-walks the tree (the `scandir()` fix above makes *resuming*
+an interrupted scan's skip phase fast, but a full fresh walk from the root
+still means one network round trip per directory; expect this to take
+hours on a library the size of a real NAS, not the seconds a resume implies)
+— and `catalog.upsert()` overwrites each row's metadata regardless of
+whether anything changed, so `mime` fills in for everything without needing
+a `reset` first.
+
+**If a re-index is still in progress (or you only want to test against what
+it's reached so far)**, `--mime-only` restricts `publish` to items that
+already have `mime` set, so `--max-items` doesn't keep landing on the
+oldest-indexed items that still have none:
+```powershell
+docker exec media-vault-container python -m mediavault.cli publish nas --mime-only --max-items 100 --commit
+```
 
 ### Deduplication
 

@@ -171,7 +171,7 @@ class PublishAction(Action):
 
     def __init__(self, source: str, connector: Connector, catalog: Catalog,
                  blobs: BlobStore, facts: FactsStore, *, max_items: Optional[int] = None,
-                 force: bool = False):
+                 force: bool = False, mime_only: bool = False):
         self.source = source
         self.connector = connector
         self.catalog = catalog
@@ -184,6 +184,11 @@ class PublishAction(Action):
         # and unchanged, ThumbnailAction's own idempotency check still skips
         # re-deriving one that's already there.
         self.force = force
+        # Restricts to items an index pass has already tagged with `mime` —
+        # for a library where only part of a re-index has landed, so this
+        # doesn't select items indexed_at-first that still have none. See
+        # Catalog.unpublished()'s docstring.
+        self.mime_only = mime_only
         self._pending = None
 
     @property
@@ -194,13 +199,14 @@ class PublishAction(Action):
     def inputs(self) -> dict:
         return {"source": self.source, "connector": self.connector.name,
                 "blobstore": self.blobs.name, "facts": self.facts.name,
-                "max_items": self.max_items, "force": self.force}
+                "max_items": self.max_items, "force": self.force,
+                "mime_only": self.mime_only}
 
     def validate(self) -> tuple[bool, str]:
         if self.catalog.count(self.source) == 0:
             return False, f"nothing indexed for {self.source} — run an index first"
         self._pending = self.catalog.unpublished(self.source, limit=self.max_items,
-                                                  force=self.force)
+                                                  force=self.force, mime_only=self.mime_only)
         return True, ""
 
     def describe(self) -> str:

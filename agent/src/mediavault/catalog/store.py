@@ -353,7 +353,7 @@ class Catalog:
             "SELECT DISTINCT source FROM items ORDER BY source")]
 
     def unpublished(self, source: str, limit: Optional[int] = None,
-                    force: bool = False) -> list[sqlite3.Row]:
+                    force: bool = False, mime_only: bool = False) -> list[sqlite3.Row]:
         """Active, hashed items with no thumbnail/facts pushed yet, oldest-indexed first.
 
         A hash is required — that's what a thumbnail is content-addressed by —
@@ -364,6 +364,13 @@ class Catalog:
         before that field existed, without a full reset + re-index. Thumbnails
         stay untouched either way: they're content-addressed and unchanged, so
         re-deriving one is wasted work regardless of `force`.
+
+        `mime_only=True` restricts to items with `mime` actually set. `mime` is
+        written at index time (see nas.py/nas_smb.py), never backfilled by a
+        republish — a library re-indexed before that field existed (or only
+        partially re-indexed since) can have a mix of rows with and without
+        it. This is how `publish --mime-only` targets just the ones a fresh
+        index pass has already reached, without waiting on the rest.
         """
         sql = (
             "SELECT * FROM items WHERE source = ? AND state = 'active' "
@@ -371,6 +378,8 @@ class Catalog:
         )
         if not force:
             sql += "AND published_at IS NULL "
+        if mime_only:
+            sql += "AND mime IS NOT NULL AND mime != '' "
         sql += "ORDER BY indexed_at, item_id"
         params: tuple = (source,)
         if limit is not None:
