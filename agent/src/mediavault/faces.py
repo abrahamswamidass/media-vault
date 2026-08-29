@@ -86,7 +86,15 @@ def detect_faces(data: bytes) -> list[dict]:
     return [
         {
             "bbox": tuple(float(v) for v in f.bbox),
-            "embedding": np.asarray(f.embedding, dtype="float32").tobytes(),
+            # normed_embedding, not embedding: catalog/people.py's clustering
+            # compares these with plain Euclidean distance under a fixed
+            # threshold, which only means anything consistent for
+            # L2-normalized vectors. insightface's raw `.embedding` has no
+            # fixed magnitude (it varies with lighting/angle/quality), so
+            # distances between two photos of the same person could land
+            # anywhere — a real bug that surfaced as near-total clustering
+            # failure (~1 unique "person" per detected face) on a real batch.
+            "embedding": np.asarray(f.normed_embedding, dtype="float32").tobytes(),
             "score": float(f.det_score),
         }
         for f in detected

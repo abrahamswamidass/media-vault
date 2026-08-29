@@ -34,6 +34,7 @@ what each command actually touches.
 | `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds — run with `docker exec -it` so Ctrl+C actually stops it. |
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
+| `people-reset --commit` | Wipe all detected faces/people to redo clustering — leaves items, scans, and published facts untouched. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
 dies, run the same command again and it resumes where it stopped.
@@ -390,11 +391,23 @@ docker exec -e FACES_LIVE=1 media-vault-container python -m mediavault.cli publi
 docker exec media-vault-container python -m mediavault.cli people
 ```
 `docker exec -e` only affects that one invocation — no container recreation
-needed for a quick test. There's currently no light "undo" for a test batch:
-detection's idempotency guard lives in the local `faces` table, separate from
-`published_at`, so clearing Firestore and re-publishing with `--force`
-re-pushes the *same* already-computed clustering rather than re-running
-detection. Don't reach for `reset nas` either — see the warning above.
+needed for a quick test. Detection's idempotency guard lives in the local
+`faces` table, separate from `published_at` — clearing Firestore and
+re-publishing with `--force` alone just re-pushes the *same*
+already-computed clustering rather than re-running detection. Don't reach
+for `reset nas` either — see the warning above; that wipes far more than
+this needs.
+
+**To undo a test batch (or recover from a bad clustering run) without
+touching anything else**, `people-reset` wipes just the local `faces`/
+`people` tables:
+```powershell
+docker exec media-vault-container python -m mediavault.cli people-reset          # preview
+docker exec media-vault-container python -m mediavault.cli people-reset --commit # actually wipe
+docker exec -e FACES_LIVE=1 media-vault-container python -m mediavault.cli publish nas --force --max-items 20 --commit
+```
+Items keep their `published_at`, quick_hash, and EXIF — only face detection
+re-runs on the next `--force` publish.
 
 **What's stored where** — deliberately split, for privacy as much as
 architecture:

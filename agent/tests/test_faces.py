@@ -27,9 +27,14 @@ def _jpeg_bytes(size=(100, 100)) -> bytes:
 
 
 class _FakeFace:
-    def __init__(self, bbox, embedding, score):
+    def __init__(self, bbox, embedding, score, normed_embedding=None):
         self.bbox = bbox
         self.embedding = embedding
+        # Defaults to the same array for tests that don't care about the
+        # distinction — pass a different value explicitly (see
+        # test_detect_faces_uses_normalized_embedding_not_raw below) to prove
+        # detect_faces() reads normed_embedding, not the raw embedding.
+        self.normed_embedding = embedding if normed_embedding is None else normed_embedding
         self.det_score = score
 
 
@@ -69,6 +74,24 @@ def test_detect_faces_maps_bbox_score_and_embedding(fake_insightface):
     assert len(result) == 1
     assert result[0]["bbox"] == (10.0, 20.0, 30.0, 40.0)
     assert result[0]["score"] == pytest.approx(0.87)
+    assert struct.unpack("3f", result[0]["embedding"]) == pytest.approx((0.1, 0.2, 0.3))
+
+
+def test_detect_faces_uses_normalized_embedding_not_raw(fake_insightface):
+    """Regression: catalog/people.py's clustering compares embeddings with
+    plain Euclidean distance under a fixed threshold, which only means
+    anything consistent for L2-normalized vectors. insightface's raw
+    `.embedding` has no fixed magnitude — using it instead of
+    `.normed_embedding` silently broke matching on a real batch (near-total
+    clustering failure: ~1 unique "person" per detected face)."""
+    import numpy as np
+    raw = np.array([9.0, -4.0, 100.0], dtype="float32")   # wrong: unbounded magnitude
+    normed = np.array([0.1, 0.2, 0.3], dtype="float32")   # right: what should be stored
+    fake_insightface["faces"] = [
+        _FakeFace((10.0, 20.0, 30.0, 40.0), raw, 0.87, normed_embedding=normed)]
+
+    result = faces.detect_faces(_jpeg_bytes())
+
     assert struct.unpack("3f", result[0]["embedding"]) == pytest.approx((0.1, 0.2, 0.3))
 
 

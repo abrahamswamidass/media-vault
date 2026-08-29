@@ -356,6 +356,11 @@ class _FakeDetectedFace:
     def __init__(self, bbox, embedding, score):
         self.bbox = bbox
         self.embedding = embedding
+        # faces.py reads normed_embedding, not embedding (see its own
+        # regression test in test_faces.py) — defaulted equal here since
+        # these tests care about the detect -> cluster -> publish wiring,
+        # not the raw-vs-normalized distinction itself.
+        self.normed_embedding = embedding
         self.det_score = score
 
 

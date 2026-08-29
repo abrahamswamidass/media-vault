@@ -329,6 +329,22 @@ class Catalog:
                 scans = c.execute("DELETE FROM scans").rowcount
         return {"items_deleted": items, "scans_deleted": scans}
 
+    def reset_people(self) -> dict:
+        """Wipe every detected face and person cluster. Never touches items,
+        scans, or anything published — items keep their `published_at`, so a
+        plain `publish` won't re-touch them; `--force` is what makes
+        FACES_LIVE re-detect on the next run, since the idempotency guard is
+        "does this item already have face rows," which this clears back to
+        none.
+
+        For recovering from a bad clustering run without a full reset +
+        re-index of the source(s) involved.
+        """
+        with self.transaction() as c:
+            faces = c.execute("DELETE FROM faces").rowcount
+            people = c.execute("DELETE FROM people").rowcount
+        return {"faces_deleted": faces, "people_deleted": people}
+
     # --- reading ---------------------------------------------------------- #
     def get(self, source: str, item_id: str) -> Optional[sqlite3.Row]:
         return self.conn.execute(

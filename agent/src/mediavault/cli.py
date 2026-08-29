@@ -432,6 +432,34 @@ def cmd_people_rename(args) -> int:
     return 0
 
 
+def cmd_people_reset(args) -> int:
+    with _catalog(args) as catalog:
+        n_faces = catalog.conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
+        n_people = catalog.conn.execute("SELECT COUNT(*) FROM people").fetchone()[0]
+
+        if not args.commit:
+            if args.json:
+                _emit({"faces": n_faces, "people": n_people, "committed": False}, True)
+            else:
+                print(f"DRY-RUN (no change): would delete {n_faces:,} face row(s) and "
+                      f"{n_people:,} person cluster(s).")
+                print("Items keep published_at — re-run publish with --force and "
+                      "FACES_LIVE=1 afterward to re-detect. Re-run with --commit to apply.")
+            return 0
+
+        result = catalog.reset_people()
+        if args.json:
+            _emit({**result, "committed": True}, True)
+            return 0
+
+        _banner(True)
+        print(f"Deleted {result['faces_deleted']:,} face row(s), "
+              f"{result['people_deleted']:,} person cluster(s).")
+        print("Nothing else changed — items, scans, and published facts are untouched. "
+              "Re-run publish with --force and FACES_LIVE=1 to re-detect.")
+        return 0
+
+
 # --------------------------------------------------------------------------- #
 # reset
 # --------------------------------------------------------------------------- #
@@ -791,8 +819,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Every person (face cluster) publish has found so far, with a "
                     "face/photo count and one sample item to eyeball. Needs "
                     "FACES_LIVE=1 during publish to have found anything at all. "
-                    "Read-only, local-catalog only — this is for sanity-checking "
-                    "clustering quality, not the eventual web 'People' tab.")
+                    "Read-only, local-catalog only — for sanity-checking clustering "
+                    "quality directly; the web 'People' tab reads person_ids off "
+                    "published items instead, not this local catalog.")
     pe.add_argument("--db", help="catalog database path")
     pe.set_defaults(_fn=cmd_people)
 
@@ -806,6 +835,19 @@ def build_parser() -> argparse.ArgumentParser:
     per.add_argument("name")
     per.add_argument("--db", help="catalog database path")
     per.set_defaults(_fn=cmd_people_rename)
+
+    prs = sub.add_parser(
+        "people-reset",
+        help="wipe all detected faces/people (local catalog only, never touches items)",
+        description="Deletes every face and person cluster from the local catalog. "
+                    "Items keep published_at, so a plain publish won't re-touch them "
+                    "— re-run publish --force with FACES_LIVE=1 afterward to "
+                    "re-detect. For recovering from a bad clustering run without a "
+                    "full reset + re-index.")
+    prs.add_argument("--db", help="catalog database path")
+    prs.add_argument("--commit", action="store_true",
+                     help="ACTUALLY delete (default: preview only)")
+    prs.set_defaults(_fn=cmd_people_reset)
 
     # -- reset --
     rs = sub.add_parser(
