@@ -208,6 +208,11 @@ def test_list_gets_metadata_from_scandir_with_no_extra_calls(fake_smbclient):
     assert records["img.jpg"].is_dir is False
     assert records["img.jpg"].size == 500
     assert records["img.jpg"].mtime == dt.replace(tzinfo=timezone.utc).timestamp()
+    # Regression: mime was hardcoded to None here (unlike the mount-based
+    # NASConnector, which already guessed it from the extension) — every
+    # item's "Type" in the web UI's details panel was always blank.
+    assert records["img.jpg"].mime == "image/jpeg"
+    assert records["Photos"].mime is None  # directories never get a mime type
 
 
 # --------------------------------------------------------------------------- #

@@ -251,6 +251,7 @@ class PublishAction(Action):
                     "camera_model": exif.get("camera_model"),
                     "latitude": exif.get("latitude"),
                     "longitude": exif.get("longitude"),
+                    "duration_seconds": exif.get("duration_seconds"),
                 })
                 self.catalog.mark_published(self.source, item_id)
                 published.append(item_id)

@@ -17,6 +17,7 @@ parallel design.
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 import posixpath
 import time
 from datetime import timezone
@@ -192,7 +193,7 @@ class SMBNASConnector(Connector):
             is_dir, size, mtime = self._entry_meta_from_scandir(entry)
             yield FileRecord(
                 id=rel, name=name, source=self.name, size=size, mtime=mtime,
-                mime=None, is_dir=is_dir,
+                mime=None if is_dir else mimetypes.guess_type(name)[0], is_dir=is_dir,
             )
             count += 1
             if count >= limit:
@@ -233,9 +234,11 @@ class SMBNASConnector(Connector):
         is_dir = self._smb.path.isdir(unc)
         size = None if is_dir else self._smb.path.getsize(unc)
         mtime = self._smb.path.getmtime(unc)
+        name = posixpath.basename(rel) or rel
         return FileRecord(
-            id=rel, name=posixpath.basename(rel) or rel, source=self.name,
-            size=size, mtime=mtime, mime=None, is_dir=is_dir,
+            id=rel, name=name, source=self.name,
+            size=size, mtime=mtime, mime=None if is_dir else mimetypes.guess_type(name)[0],
+            is_dir=is_dir,
             quick_hash=None if is_dir else _quick_fingerprint_smb(self._smb, unc, size),
         )
 

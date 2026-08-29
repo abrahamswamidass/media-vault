@@ -21,6 +21,16 @@ function effectiveDate(item) {
   return item.date_taken ?? item.mtime;
 }
 
+function formatDuration(seconds) {
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(h ? 2 : 1, "0");
+  const ss = String(s).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 function renderDetails(item) {
   const dl = modal.querySelector(".modal-details");
   dl.innerHTML = "";
@@ -31,6 +41,10 @@ function renderDetails(item) {
     ["Path", item.item_id],
     ["Taken", new Date(effectiveDate(item) * 1000).toLocaleString()],
     ["Dimensions", dims],
+    // Absent for most videos, not just photos — see metadata.py's file
+    // header on why a video's duration atom can legitimately fall outside
+    // the head-read window this comes from.
+    ["Duration", item.duration_seconds ? formatDuration(item.duration_seconds) : null],
     ["Size", item.size ? `${(item.size / 1024).toFixed(0)} KB` : null],
     ["Camera", camera || null],
     ["Source", item.source],

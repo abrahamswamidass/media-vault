@@ -49,6 +49,10 @@
     "longitude": {
       "type": ["number", "null"], "minimum": -180, "maximum": 180
     },
+    "duration_seconds": {
+      "type": ["number", "null"], "minimum": 0,
+      "description": "Video length, where present. Best-effort within the same head-read budget as the rest of this item's EXIF — a video whose duration atom wasn't in that window (common for large, non-\"fast start\" files) comes back null, not an error."
+    },
     "indexed_at": {
       "type": "string",
       "format": "date-time",

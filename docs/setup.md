@@ -207,12 +207,30 @@ extra setup. Without it, every HEIC would fail with an unhelpful "cannot
 identify image file" rather than publishing.
 
 Each item also gets EXIF pulled from a small header read (dimensions, camera
-make/model, real capture date, GPS coordinates where present) via the
-`exiftool`/PyExifTool already baked into the image — no extra setup needed.
-It's best-effort: files with no EXIF (screenshots, some exports), no GPS block
-(most photos — screenshots, edited exports, cameras with location off), or a
-missing PyExifTool install just leave those fields empty rather than failing
-the item. `doctor` reports whether PyExifTool is available under "Tooling".
+make/model, real capture date, GPS coordinates, video duration where present)
+via the `exiftool`/PyExifTool already baked into the image — no extra setup
+needed. It's best-effort: files with no EXIF (screenshots, some exports), no
+GPS block (most photos — screenshots, edited exports, cameras with location
+off), or a missing PyExifTool install just leave those fields empty rather
+than failing the item. `doctor` reports whether PyExifTool is available under
+"Tooling".
+
+**The capture date tries three EXIF sources before giving up**:
+`DateTimeOriginal`, then `CreateDate`, then (for video) `QuickTime:CreateDate`
+— each only used if it's plausible (roughly 1995–now; a camera with a dead
+clock battery resetting to a manufacture-era or epoch date is a real, common
+failure mode, and a bogus date shouldn't win over a genuine one from a
+different tag). If every source is missing or implausible, the web viewer's
+own fallback to file-modified time still applies.
+
+**Video duration is best-effort in a different way**: it lives in the file's
+own container metadata (the moov atom for `.MOV`/`.MP4`), which some
+recording tools write at the very *end* of the file — only "fast start"
+files put it up front. A video whose duration didn't make it into that same
+small header read just comes back with no duration, same as a photo with no
+EXIF. Reading further to chase it would mean downloading arbitrarily large
+video files just for a number, which is exactly what this project avoids
+everywhere else (see the dedup confirmation notes above).
 
 **Already-published items are skipped on a normal run** — that's what makes
 re-runs cheap, but it also means a fact field added after your library was
@@ -224,6 +242,19 @@ unaffected either way: they're content-addressed and unchanged, so
 ```powershell
 docker exec media-vault-container python -m mediavault.cli publish nas --force --commit
 ```
+
+**One field `--force` alone won't backfill: `mime`.** Unlike the EXIF fields
+above (all read fresh at publish time), `mime` is set once, at *index* time,
+from the connector's own directory listing — so an item indexed before this
+was added stays stuck with no MIME type until it's indexed again:
+```powershell
+docker exec media-vault-container python -m mediavault.cli index nas
+```
+A plain re-run like this is safe and only touches what's actually still
+missing — it re-walks the tree (fast, thanks to the `scandir()` fix above),
+and `catalog.upsert()` overwrites each row's metadata regardless of whether
+anything changed, so `mime` fills in for everything without needing a
+`reset` first.
 
 ### Deduplication
 

@@ -94,7 +94,7 @@ def fake_exiftool(monkeypatch):
     state = {"result": []}
 
     class FakeExifToolHelper:
-        def get_tags(self, files, tags):
+        def get_tags(self, files, tags, params=None):
             return state["result"]
 
     monkeypatch.setitem(sys.modules, "exiftool",
@@ -149,6 +149,19 @@ def test_missing_gps_leaves_coordinates_null_not_zero(nas, catalog, blobs, facts
     row = catalog.get("nas", "Photos/real.jpg")
     assert row["latitude"] is None
     assert row["longitude"] is None
+
+
+def test_commit_extracts_and_stores_video_duration(nas, catalog, blobs, facts, fake_exiftool):
+    fake_exiftool["result"] = [{"Composite:Duration": 12.34}]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["duration_seconds"] == 12.34
+
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert "12.34" in fact_file.read_text()
 
 
 def test_missing_exif_tool_does_not_block_publish(nas, catalog, blobs, facts, monkeypatch):

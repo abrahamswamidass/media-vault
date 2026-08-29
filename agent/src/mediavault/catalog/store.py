@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS items (
     camera_model TEXT,
     latitude    REAL,
     longitude   REAL,
+    duration_seconds REAL,
     PRIMARY KEY (source, item_id)
 );
 
@@ -104,6 +105,7 @@ class Catalog:
             "ALTER TABLE items ADD COLUMN camera_model TEXT",
             "ALTER TABLE items ADD COLUMN latitude REAL",
             "ALTER TABLE items ADD COLUMN longitude REAL",
+            "ALTER TABLE items ADD COLUMN duration_seconds REAL",
         ):
             try:
                 self.conn.execute(ddl)
@@ -180,12 +182,13 @@ class Catalog:
             """
             UPDATE items SET width = ?, height = ?, date_taken = ?,
                              camera_make = ?, camera_model = ?,
-                             latitude = ?, longitude = ?
+                             latitude = ?, longitude = ?, duration_seconds = ?
             WHERE source = ? AND item_id = ?
             """,
             (exif.get("width"), exif.get("height"), exif.get("date_taken"),
              exif.get("camera_make"), exif.get("camera_model"),
-             exif.get("latitude"), exif.get("longitude"), source, item_id),
+             exif.get("latitude"), exif.get("longitude"),
+             exif.get("duration_seconds"), source, item_id),
         )
 
     def reset(self, source: str | None = None) -> dict:
