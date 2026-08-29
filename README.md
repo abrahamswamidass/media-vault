@@ -33,12 +33,14 @@ media-vault/
 │   └── tests/              #   runs with no cloud account and no Docker
 ├── web/                    # MODULE 2 — React on Firebase Hosting (not yet built)
 ├── shared/contracts/       # JSON Schema both modules validate against
-├── docs/                   # architecture.html · setup.md · command-catalog.html
+├── docs/                   # setup.md · agent.md · web.md · architecture.html · command-catalog.html
 ├── run.sh / run.bat        # convenience wrappers (Linux-macOS / Windows)
 └── sample/                 # a fake NAS so you can try it with zero setup
 ```
 
-Start with [docs/setup.md](docs/setup.md). See [docs/architecture.html](docs/architecture.html)
+Start with [docs/setup.md](docs/setup.md) to get the container running, then
+[docs/agent.md](docs/agent.md) for CLI commands and [docs/web.md](docs/web.md)
+for the browser viewer. See [docs/architecture.html](docs/architecture.html)
 for how the two modules stay in sync, and [CLAUDE.md](CLAUDE.md) for the design rules.
 
 ---

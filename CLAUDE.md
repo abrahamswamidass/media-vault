@@ -64,9 +64,11 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  gated to a small hardcoded allowlist (family/household
                  accounts, not the general public); enforced server-side by
                  firestore.rules/storage.rules, not by hiding the URL. See
-                 docs/setup.md's "Web viewer".
+                 docs/web.md.
 shared/contracts/ JSON Schema both modules validate against. Change here first.
-docs/            architecture.html, setup.md, command-catalog.html
+docs/            setup.md (get the container running), agent.md (CLI
+                 commands), web.md (browser viewer setup), architecture.html,
+                 command-catalog.html (visual command-impact reference)
 ```
 
 Dependency direction is strictly one-way and must stay that way:
