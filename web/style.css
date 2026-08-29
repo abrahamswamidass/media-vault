@@ -493,12 +493,11 @@ nav a.active {
 }
 
 .card .meta {
-  padding: 0.4rem 0.5rem;
-  font-size: 0.75rem;
-  color: #aaa;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* The raw NAS path (e.g. "percial/Photos/MobileBackup/...") isn't a
+  useful caption — it's still one click away in the photo modal's own
+  "Path"/"Name" fields, so it's dropped from the grid itself rather than
+  shown truncated on every card. */
+  display: none;
 }
 
 .amazon-list {
