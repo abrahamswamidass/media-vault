@@ -370,10 +370,10 @@ the image already. Set the live switch to turn it on:
   -e FACES_LIVE=1 `
 ```
 
-**The first real run needs internet access once**, to download model weights
-(a few hundred MB, cached under `~/.insightface` inside the container after
-that). It also costs real CPU time per photo — expect a `publish` run to
-take noticeably longer with this on than without it.
+**Model weights (`buffalo_l`, ~280MB) are baked into the image at build
+time** (see the Dockerfile) — no internet access needed at runtime, and no
+first-run download delay. It still costs real CPU time per photo, though:
+expect a `publish` run to take noticeably longer with this on than without it.
 
 It runs on the same full-resolution read `publish` already does for
 thumbnailing — no extra NAS traffic. Video files are skipped (needs an

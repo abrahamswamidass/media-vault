@@ -12,9 +12,10 @@ an embedding to a person (or starting a new person) is catalog/people.py's
 job, not this file's; naming a person is a person's job, not this project's.
 
 Gated behind FACES_LIVE=1 (see PublishAction), off by default like every
-other live switch in this project — the first real run needs to download
-model weights (a few hundred MB, cached under ~/.insightface after that) and
-costs real CPU time per image, not something that should turn on silently.
+other live switch in this project — model weights are baked into the image
+at build time (see Dockerfile), so no first-run download, but this still
+costs real CPU time per image and isn't something that should turn on
+silently.
 """
 from __future__ import annotations
 

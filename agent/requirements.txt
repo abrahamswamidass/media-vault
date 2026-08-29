@@ -21,8 +21,9 @@ pillow-heif>=0.15.0
 
 # --- Face detection/clustering (set FACES_LIVE=1 to use) --------------------
 # ONNX-based, not dlib — no C++ toolchain needed in this slim Docker image.
-# First real run downloads model weights (a few hundred MB, cached after
-# that under ~/.insightface) — needs real internet access once.
+# Model weights (buffalo_l, ~280MB) are baked into the image at build time
+# (see Dockerfile) — no internet access needed at runtime, unlike a plain
+# `pip install` of this package would imply on its own.
 insightface>=0.7.3
 onnxruntime>=1.16.0
 
