@@ -80,7 +80,17 @@ class ThumbnailAction(Action):
         decodable = _read_decodable(self.connector, self.item_id, self._record.mime)
         data = imaging.thumbnail(decodable)
         self.blobs.put(key, data, content_type="image/webp")
-        return {"key": key, "bytes": len(data), "url": self.blobs.url(key)}
+        outputs = {"key": key, "bytes": len(data), "url": self.blobs.url(key)}
+        # Perceptual hash rides along for free here (photos only) — this is
+        # already the one full read+decode a fresh thumbnail costs, so
+        # PublishAction picks this up rather than paying for a second full
+        # read just for the hash. See imaging.phash().
+        if (self._record.mime or "").startswith("image/"):
+            try:
+                outputs["phash"] = imaging.phash(decodable)
+            except Exception:
+                pass
+        return outputs
 
 
 class FetchFullResAction(Action):

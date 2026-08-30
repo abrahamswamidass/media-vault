@@ -497,10 +497,13 @@ def test_phash_skips_non_image_items(nas, catalog, blobs, facts):
     assert catalog.get("nas", "clip.mov")["phash"] is None
 
 
-def test_faces_and_phash_share_one_full_read_not_two(nas, catalog, blobs, facts,
-                                                      fake_insightface, monkeypatch):
-    """Both need the full decoded image — reading the file twice for two
-    bonus fields would double NAS traffic for nothing."""
+def test_phash_rides_free_on_the_thumbnails_own_decode(nas, catalog, blobs, facts,
+                                                        fake_insightface, monkeypatch):
+    """A fresh thumbnail derivation already reads+decodes the whole file —
+    phash must reuse that, not pay for a second full read on top of it.
+    Face detection (when live) still needs its own separate read, since it
+    doesn't share ThumbnailAction's internals — this proves phash isn't
+    ALSO adding a third read on top of that."""
     import numpy as np
     monkeypatch.setenv("FACES_LIVE", "1")
     fake_insightface["faces"] = [_FakeDetectedFace(
@@ -517,7 +520,25 @@ def test_faces_and_phash_share_one_full_read_not_two(nas, catalog, blobs, facts,
 
     PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
 
-    assert full_reads == ["Photos/real.jpg"]  # exactly one full read, not two
+    # One read for the thumbnail's own decode (phash rides along with it),
+    # one for face detection — not three, which is what a phash-specific
+    # extra read would cost.
+    assert full_reads == ["Photos/real.jpg", "Photos/real.jpg"]
     assert catalog.get("nas", "Photos/real.jpg")["phash"] is not None
     assert fake_insightface["calls"] == 1
     assert len(catalog.faces_for_item("nas", "Photos/real.jpg")) == 1  # not duplicated
+
+
+def test_phash_backfills_via_its_own_read_when_thumbnail_was_already_stored(nas, catalog, blobs, facts):
+    """An item published before phash existed has a thumbnail already (a
+    NoOp on republish, so no free decode to ride along with) but no phash —
+    a --force republish must still backfill it via a dedicated read."""
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    catalog.conn.execute(
+        "UPDATE items SET phash = NULL WHERE source = 'nas' AND item_id = 'Photos/real.jpg'")
+    catalog.conn.commit()
+
+    PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
+
+    assert catalog.get("nas", "Photos/real.jpg")["phash"] is not None

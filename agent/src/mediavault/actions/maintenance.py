@@ -251,34 +251,35 @@ class PublishAction(Action):
                 if exif:
                     self.catalog.set_exif(self.source, item_id, exif)
 
-                # Faces and the perceptual hash both need the FULL image
-                # decoded (unlike EXIF's bounded head read), so their reads
-                # are consolidated into one — reading the file twice for two
-                # bonus fields would double the NAS traffic for nothing.
                 mime = row["mime"] or ""
                 is_image = mime.startswith("image/")
 
-                # Faces are a bonus — never block publishing. Gated behind
-                # FACES_LIVE (off by default, like every other live switch
-                # here) since it costs real CPU time per image. Idempotent
-                # per item: without the `not existing` check, a `--force`
-                # re-run (e.g. to backfill GPS on already-published items)
-                # would re-detect every face on every republished item,
-                # duplicating rows in `faces` and re-paying the compute cost
-                # for nothing new.
+                # Perceptual hash: a bonus, always-on for images (cheap
+                # relative to face detection, no model/live-switch needed) —
+                # for near-duplicate review grouping in the web module, see
+                # imaging.phash(). Free on a fresh thumbnail derivation
+                # (ThumbnailAction already decoded the image — see its own
+                # phash output); a NoOp thumbnail (already stored) has no
+                # outputs, so an item published before this field existed
+                # falls back to its own dedicated read below, once, and is
+                # persisted so it's never paid for again after that.
+                phash = row["phash"]
+                if phash is None and is_image:
+                    phash = thumb.outputs.get("phash")
+                need_phash = phash is None and is_image
+
+                # Faces are a bonus too — never block publishing. Gated
+                # behind FACES_LIVE (off by default, like every other live
+                # switch here) since it costs real CPU time per image.
+                # Idempotent per item: without the `not existing` check, a
+                # `--force` re-run (e.g. to backfill GPS on already-published
+                # items) would re-detect every face on every republished
+                # item, duplicating rows in `faces` and re-paying the
+                # compute cost for nothing new.
                 existing = self.catalog.faces_for_item(self.source, item_id)
                 person_ids: list[str] = sorted({
                     str(f["person_id"]) for f in existing if f["person_id"] is not None})
                 need_faces = not existing and os.getenv("FACES_LIVE", "0") == "1" and is_image
-
-                # Perceptual hash: also a bonus, always-on for images (cheap
-                # relative to face detection, no model/live-switch needed) —
-                # for near-duplicate review grouping in the web module, see
-                # imaging.phash(). Computed once and persisted; a later
-                # publish (even --force) reuses the stored value rather than
-                # re-reading and re-decoding the file for an unchanged hash.
-                phash = row["phash"]
-                need_phash = phash is None and is_image
 
                 full = None
                 if need_faces or need_phash:
@@ -290,9 +291,11 @@ class PublishAction(Action):
                 if full is not None and need_phash:
                     try:
                         phash = imaging.phash(full)
-                        self.catalog.set_phash(self.source, item_id, phash)
                     except Exception:
                         pass
+
+                if phash is not None:
+                    self.catalog.set_phash(self.source, item_id, phash)
 
                 if full is not None and need_faces:
                     on_match = None
