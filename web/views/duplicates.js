@@ -22,7 +22,12 @@ import { openPhotoAt } from "../photoModal.js";
 
 const SCAN_LIMIT = 5000;
 const TIME_WINDOW_SECONDS = 3600; // near-dups are overwhelmingly same-event
-const HAMMING_THRESHOLD = 10;     // out of 64 bits — a real re-compression/burst shot differs by well under this
+// Out of 64 bits. Started at 10 (tight — only near-identical shots caught
+// together); loosened to 14 after a first real-world look showed clean
+// groups with room to catch more of the same burst (a slightly different
+// angle/zoom a beat apart). Still comfortably short of ~20+, where dHash
+// starts treating genuinely different photos as "similar".
+const HAMMING_THRESHOLD = 14;
 
 let root = null;
 let statusEl = null;
