@@ -53,6 +53,46 @@ class DeleteAction(Action):
         return res.data
 
 
+class RestoreAction(Action):
+    """Undo a soft delete — the reverse of DeleteAction. Moves a file back
+    out of trash to where it came from (NAS), or clears Drive's own trashed
+    flag. Every connector's delete() in this project is deliberately
+    reversible, so anything that can be deleted can be restored.
+
+    Unlike DeleteAction, validate() can't stat() the item_id at its
+    original location — that's exactly where it no longer is, having been
+    moved to trash. connector.restore() itself raises FileNotFoundError if
+    nothing's actually there to restore.
+    """
+    action_type = "restore"
+
+    def __init__(self, item_id: str, connector: Connector):
+        self.item_id = item_id
+        self.connector = connector
+
+    @property
+    def target_id(self) -> str:
+        return self.item_id
+
+    @property
+    def inputs(self) -> dict:
+        return {"connector": self.connector.name, "item_id": self.item_id}
+
+    def validate(self) -> tuple[bool, str]:
+        if not self.connector.can_delete:
+            return False, f"{self.connector.name} does not support delete/restore"
+        return True, ""
+
+    def describe(self) -> str:
+        return f"restore {self.item_id} on {self.connector.name} (undo a soft delete)"
+
+    def _execute(self) -> dict:
+        res = self.connector.restore(self.item_id, commit=True)
+        if not res.ok:
+            raise RuntimeError(res.detail)
+        return res.data
+
+
 class CopyAction(Action):
     """Copy an item from one connector to another. Source is left untouched."""
     action_type = "copy"

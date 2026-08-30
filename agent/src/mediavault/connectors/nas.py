@@ -126,6 +126,26 @@ class NASConnector(Connector):
         return OpResult(ok=True, action="delete", target=str(rel), committed=True,
                         detail=f"moved to trash: {dest}", data={"dest": str(dest)})
 
+    def restore(self, item_id: str, commit: bool = False) -> OpResult:
+        """Undo a soft delete: move a file back out of trash to where it
+        came from. The inverse of delete() — same relative-path mirroring,
+        so this is deterministic from item_id alone."""
+        src = (self.trash / item_id).resolve()
+        if self.trash not in src.parents and src != self.trash:
+            raise ValueError(f"Refusing to operate outside trash: {src}")
+        if not src.exists():
+            raise FileNotFoundError(src)
+        dest = self._resolve(item_id)
+        if dest.exists():
+            raise FileExistsError(f"{item_id} already exists at its original location")
+        if not commit:
+            return self.dryrun_result("restore", item_id,
+                                      detail=f"would move -> {dest}", dest=str(dest))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        return OpResult(ok=True, action="restore", target=item_id, committed=True,
+                        detail=f"restored from trash: {dest}", data={"dest": str(dest)})
+
     def upload(self, local_path: str, dest: str = "", commit: bool = False) -> OpResult:
         """Copy a file INTO the NAS (e.g. staging a cherry-pick for Amazon)."""
         src = Path(local_path).expanduser().resolve()

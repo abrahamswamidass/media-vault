@@ -281,6 +281,23 @@ class SMBNASConnector(Connector):
         return OpResult(ok=True, action="delete", target=rel, committed=True,
                         detail=f"moved to trash: {dest_unc}", data={"dest": dest_unc})
 
+    def restore(self, item_id: str, commit: bool = False) -> OpResult:
+        """Undo a soft delete: move a file back out of trash over SMB to
+        where it came from. The inverse of delete() — same relative-path
+        mirroring, so this is deterministic from item_id alone."""
+        dest_unc, rel = self._resolve(item_id)
+        src_unc = self._to_unc(f"{self._trash_rel}/{rel}")
+        if not self._smb.path.exists(src_unc):
+            raise FileNotFoundError(src_unc)
+        if self._smb.path.exists(dest_unc):
+            raise FileExistsError(f"{item_id} already exists at its original location")
+        if not commit:
+            return self.dryrun_result("restore", rel, detail=f"would move -> {dest_unc}", dest=dest_unc)
+        self._smb.makedirs(posixpath.dirname(dest_unc.replace("\\", "/")).replace("/", "\\"), exist_ok=True)
+        self._smb.rename(src_unc, dest_unc)
+        return OpResult(ok=True, action="restore", target=rel, committed=True,
+                        detail=f"restored from trash: {dest_unc}", data={"dest": dest_unc})
+
     def upload(self, local_path: str, dest: str = "", commit: bool = False) -> OpResult:
         """Copy a LOCAL file onto the NAS over SMB (e.g. staging a cherry-pick)."""
         from pathlib import Path

@@ -36,7 +36,7 @@ service cloud.firestore {
                     // client-tamper guard, not the authoritative list; the
                     // agent refuses anything not in REGISTRY regardless.
                     && request.resource.data.type in [
-                         "fetch_fullres", "thumbnail", "delete", "copy", "move",
+                         "fetch_fullres", "thumbnail", "delete", "restore", "copy", "move",
                          "index", "dedup_source", "publish", "stage_for_amazon"
                        ];
       allow update, delete: if false;

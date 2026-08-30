@@ -185,6 +185,13 @@ class Connector(ABC):
     def delete(self, item_id: str, commit: bool = False) -> OpResult:
         raise NotSupported(f"{self.name}: delete not supported")
 
+    def restore(self, item_id: str, commit: bool = False) -> OpResult:
+        """Undo a soft delete — the inverse of delete(). Every connector's
+        delete() in this project is deliberately reversible (moves to trash,
+        never an unlink — see CLAUDE.md's "archiving is always reversible"
+        rule), so a connector that supports delete should support this too."""
+        raise NotSupported(f"{self.name}: restore not supported")
+
     def upload(self, local_path: str, dest: str = "", commit: bool = False) -> OpResult:
         raise NotSupported(f"{self.name}: upload not supported")
 

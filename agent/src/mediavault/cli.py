@@ -38,7 +38,7 @@ from .actions.maintenance import PublishAction
 from .connectors import CONNECTORS, build_connector
 from .ports import FileRecord, NotSupported, OpResult
 
-CONNECTOR_COMMANDS = ["list", "stat", "read", "delete", "upload", "caps"]
+CONNECTOR_COMMANDS = ["list", "stat", "read", "delete", "restore", "upload", "caps"]
 
 
 # --------------------------------------------------------------------------- #
@@ -690,6 +690,12 @@ def cmd_connector(args) -> int:
             _banner(res.committed)
             _emit(res, args.json)
 
+        elif args.command == "restore":
+            _require(args.target, "target id/path")
+            res = conn.restore(args.target, commit=args.commit)
+            _banner(res.committed)
+            _emit(res, args.json)
+
         elif args.command == "upload":
             _require(args.target, "local file path")
             res = conn.upload(args.target, dest=args.dest, commit=args.commit)
@@ -699,7 +705,7 @@ def cmd_connector(args) -> int:
     except NotSupported as e:
         print(f"[not-supported] {e}", file=sys.stderr)
         return 2
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, FileExistsError, ValueError) as e:
         print(f"[error] {e}", file=sys.stderr)
         return 1
     return 0

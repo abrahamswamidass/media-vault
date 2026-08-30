@@ -176,3 +176,16 @@ class DriveConnector(Connector):
             svc.files().update(fileId=item_id, body={"trashed": True}).execute()
         return OpResult(ok=True, action="delete", target=item_id, committed=True,
                         detail=f"{mode} done", data={"mode": mode})
+
+    def restore(self, item_id: str, commit: bool = False) -> OpResult:
+        """Undo a soft delete: clear Drive's own trashed flag. Only meaningful
+        for a file trashed with `--permanent` off — a permanently deleted file
+        is gone for good, Drive's API has no way to bring it back, and this
+        will simply fail with a 404 from Drive itself if you try."""
+        if not commit or not LIVE:
+            why = "dry-run" if not commit else "SAFE mode (DRIVE_LIVE!=1)"
+            return self.dryrun_result("restore", item_id, detail=f"would untrash [{why}]")
+        svc = self._service()
+        svc.files().update(fileId=item_id, body={"trashed": False}).execute()
+        return OpResult(ok=True, action="restore", target=item_id, committed=True,
+                        detail="restored from Drive trash")

@@ -28,7 +28,7 @@ from typing import Callable, Optional
 from ..actions.amazon import StageForAmazonAction
 from ..actions.base import Action, ActionResult
 from ..actions.derive import FetchFullResAction, ThumbnailAction
-from ..actions.file_ops import CopyAction, DeleteAction, MoveAction
+from ..actions.file_ops import CopyAction, DeleteAction, MoveAction, RestoreAction
 from ..actions.maintenance import DedupSourceAction, IndexAction, PublishAction
 
 # --------------------------------------------------------------------------- #
@@ -94,6 +94,12 @@ REGISTRY: dict[str, tuple[Callable[[Intent, "AgentContext"], Action], str]] = {
             i.item_id, ctx.connector(i.params.get("source", "nas")),
         ),
         "soft-delete one item (moves to trash)",
+    ),
+    "restore": (
+        lambda i, ctx: RestoreAction(
+            i.item_id, ctx.connector(i.params.get("source", "nas")),
+        ),
+        "undo a soft delete (moves an item back out of trash)",
     ),
     "copy": (
         lambda i, ctx: CopyAction(

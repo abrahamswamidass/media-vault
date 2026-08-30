@@ -24,6 +24,7 @@
         "fetch_fullres",
         "thumbnail",
         "delete",
+        "restore",
         "copy",
         "move",
         "index",

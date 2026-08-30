@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from mediavault.actions import (
-    ActionLog, CopyAction, DeleteAction, MoveAction,
+    ActionLog, CopyAction, DeleteAction, MoveAction, RestoreAction,
     STATUS_FAILED, STATUS_NOOP, STATUS_OK,
 )
 from mediavault.actions.base import Action
@@ -88,6 +88,51 @@ def test_move_copies_before_deleting(nas, staging):
     assert (staging.root / "img_001.jpg").exists()
     assert (nas.trash / "Photos" / "img_001.jpg").exists()
     assert not (nas.root / "Photos" / "img_001.jpg").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Restore — undo a soft delete
+# --------------------------------------------------------------------------- #
+def test_restore_moves_a_file_back_out_of_trash(nas):
+    DeleteAction("Photos/junk.jpg", nas).run(commit=True)
+    assert not (nas.root / "Photos" / "junk.jpg").exists()
+
+    result = RestoreAction("Photos/junk.jpg", nas).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.committed is True
+    assert (nas.root / "Photos" / "junk.jpg").exists()
+    assert not (nas.trash / "Photos" / "junk.jpg").exists()
+
+
+def test_restore_dry_run_does_not_move_anything(nas):
+    DeleteAction("Photos/junk.jpg", nas).run(commit=True)
+
+    result = RestoreAction("Photos/junk.jpg", nas).run()  # no commit=
+
+    assert result.committed is False
+    assert not (nas.root / "Photos" / "junk.jpg").exists()
+    assert (nas.trash / "Photos" / "junk.jpg").exists()
+
+
+def test_restore_fails_clearly_when_nothing_is_in_trash(nas):
+    result = RestoreAction("Photos/never_deleted.jpg", nas).run(commit=True)
+
+    assert result.status == STATUS_FAILED
+    assert not result.committed
+
+
+def test_restore_refuses_to_overwrite_a_file_at_the_original_location(nas):
+    """A safety guard: if something new was created at the original path
+    since the delete, blindly restoring on top of it would silently
+    destroy that newer file."""
+    DeleteAction("Photos/junk.jpg", nas).run(commit=True)
+    (nas.root / "Photos" / "junk.jpg").write_bytes(b"a different file now lives here")
+
+    result = RestoreAction("Photos/junk.jpg", nas).run(commit=True)
+
+    assert result.status == STATUS_FAILED
+    assert (nas.root / "Photos" / "junk.jpg").read_bytes() == b"a different file now lives here"
 
 
 # --------------------------------------------------------------------------- #
