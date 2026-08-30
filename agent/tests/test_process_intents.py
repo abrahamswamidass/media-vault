@@ -94,6 +94,26 @@ def test_commit_claims_runs_and_completes_the_intent(tmp_path, monkeypatch, caps
     assert raw["result"]["committed"] is True
 
 
+def test_delete_intent_also_removes_the_items_published_fact(tmp_path, monkeypatch):
+    """The web module's "delete" intent (e.g. the Duplicates tab's Archive
+    button) has to make the item disappear from Browse/Map/Folders/People
+    too, not just move the file on the NAS -- a plain file move with no
+    Firestore cleanup would leave it showing everywhere forever."""
+    db, intents_dir, amazon = _setup(tmp_path, monkeypatch)
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "nas__Photos_img.jpg.json").write_text(
+        json.dumps({"source": "nas", "item_id": "Photos/img.jpg"}))
+    intent_id = _write_intent(intents_dir, type_="delete", item_id="Photos/img.jpg")
+
+    args = _common_args(db, intents_dir, tmp_path, commit=True)
+    assert main(args) == 0
+
+    raw = json.loads((intents_dir / f"{intent_id}.json").read_text())
+    assert raw["status"] == "done"
+    assert not (facts_dir / "nas__Photos_img.jpg.json").exists()
+
+
 def test_unknown_intent_type_fails_that_intent_without_crashing_the_batch(tmp_path, monkeypatch):
     db, intents_dir, amazon = _setup(tmp_path, monkeypatch)
     bad_id = _write_intent(intents_dir, type_="not_a_real_type")

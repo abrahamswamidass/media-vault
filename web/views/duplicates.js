@@ -39,10 +39,21 @@ function hamming(hexA, hexB) {
   return count;
 }
 
+// Same split Browse/the photo modal already use: the Firestore query orders
+// by mtime (guaranteed present — Firestore silently drops documents missing
+// whatever field orderBy names), but grouping/display prefers the real
+// capture time when EXIF gave one. A burst sequence is defined by capture
+// time, not by whenever the files happened to land on the NAS -- an import
+// or sync can compress or spread out mtimes in ways that don't reflect when
+// the photos were actually taken.
+function effectiveDate(item) {
+  return item.date_taken ?? item.mtime ?? 0;
+}
+
 function groupNearDuplicates(items) {
   const withHash = items
     .filter((it) => it.phash)
-    .sort((a, b) => (a.mtime || 0) - (b.mtime || 0));
+    .sort((a, b) => effectiveDate(a) - effectiveDate(b));
   const used = new Set();
   const found = [];
   for (let i = 0; i < withHash.length; i++) {
@@ -52,9 +63,9 @@ function groupNearDuplicates(items) {
     for (let j = i + 1; j < withHash.length; j++) {
       if (used.has(j)) continue;
       const cand = withHash[j];
-      // Sorted by mtime — once a candidate is past the window, everything
-      // after it is too, so this can stop scanning this base early.
-      if ((cand.mtime || 0) - (base.mtime || 0) > TIME_WINDOW_SECONDS) break;
+      // Sorted by effectiveDate — once a candidate is past the window,
+      // everything after it is too, so this can stop scanning this base early.
+      if (effectiveDate(cand) - effectiveDate(base) > TIME_WINDOW_SECONDS) break;
       if (hamming(base.phash, cand.phash) <= HAMMING_THRESHOLD) {
         group.push(cand);
         used.add(j);

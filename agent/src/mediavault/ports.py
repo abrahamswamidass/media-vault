@@ -94,6 +94,12 @@ class FactsStore(ABC):
         """Write (overwrite) the metadata document for one item."""
 
     @abstractmethod
+    def delete(self, source: str, item_id: str) -> None:
+        """Remove one item's metadata document. Deleting a document that's
+        already gone is not an error — callers (see ArchiveItemAction) rely
+        on this being safe to retry."""
+
+    @abstractmethod
     def purge(self, source: str | None = None) -> int:
         """Delete every fact for a source (or everything if source is None).
 

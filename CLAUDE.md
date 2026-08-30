@@ -59,10 +59,12 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  again: buckets a bounded recent-items scan by Hamming
                  distance within a time window, since near-dups are almost
                  always same-event; review-only by design, per the dedup
-                 rules below — archiving one writes a plain `delete` intent
-                 per photo, nothing auto-picks a "keeper"), Amazon
-                 (read-only status of staged intents), and Activity (history
-                 of every intent, any type — not just Amazon staging; a
+                 rules below — archiving one writes a `delete` intent per
+                 photo (which removes its Firestore fact too, not just the
+                 NAS file — see ArchiveItemAction), nothing auto-picks a
+                 "keeper"), Amazon (read-only status of staged intents), and
+                 Activity (history of every intent, any type — not just
+                 Amazon staging; a
                  completed `delete` gets an Undo button, which writes a
                  `restore` intent for the same item) are all functional now.
                  Folders can hide a folder (a checkbox per

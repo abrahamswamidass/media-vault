@@ -40,6 +40,10 @@ class LocalFactsStore(FactsStore):
         p = self.root / f"{doc_id(source, item_id)}.json"
         p.write_text(json.dumps(fact, indent=2, default=str))
 
+    def delete(self, source: str, item_id: str) -> None:
+        p = self.root / f"{doc_id(source, item_id)}.json"
+        p.unlink(missing_ok=True)
+
     def purge(self, source: str | None = None) -> int:
         prefix = f"{source}__" if source else ""
         deleted = 0
@@ -89,6 +93,13 @@ class FirestoreFactsStore(FactsStore):
     def put(self, source: str, item_id: str, fact: dict) -> None:
         client = self._require_live()
         client.collection(self.collection).document(doc_id(source, item_id)).set(fact)
+
+    def delete(self, source: str, item_id: str) -> None:
+        # Deleting a Firestore document that doesn't exist is already a
+        # no-op server-side, not an error -- nothing extra needed to make
+        # this safe to retry.
+        client = self._require_live()
+        client.collection(self.collection).document(doc_id(source, item_id)).delete()
 
     def purge(self, source: str | None = None) -> int:
         client = self._require_live()

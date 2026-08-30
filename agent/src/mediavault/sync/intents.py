@@ -28,7 +28,7 @@ from typing import Callable, Optional
 from ..actions.amazon import StageForAmazonAction
 from ..actions.base import Action, ActionResult
 from ..actions.derive import FetchFullResAction, ThumbnailAction
-from ..actions.file_ops import CopyAction, DeleteAction, MoveAction, RestoreAction
+from ..actions.file_ops import ArchiveItemAction, CopyAction, MoveAction, RestoreAction
 from ..actions.maintenance import DedupSourceAction, IndexAction, PublishAction
 
 # --------------------------------------------------------------------------- #
@@ -90,14 +90,15 @@ REGISTRY: dict[str, tuple[Callable[[Intent, "AgentContext"], Action], str]] = {
         "derive and push one thumbnail",
     ),
     "delete": (
-        lambda i, ctx: DeleteAction(
-            i.item_id, ctx.connector(i.params.get("source", "nas")),
+        lambda i, ctx: ArchiveItemAction(
+            i.item_id, ctx.connector(i.params.get("source", "nas")), ctx.require_facts(),
+            catalog=ctx.catalog,
         ),
-        "soft-delete one item (moves to trash)",
+        "soft-delete one item (moves to trash) and remove its published fact",
     ),
     "restore": (
         lambda i, ctx: RestoreAction(
-            i.item_id, ctx.connector(i.params.get("source", "nas")),
+            i.item_id, ctx.connector(i.params.get("source", "nas")), catalog=ctx.catalog,
         ),
         "undo a soft delete (moves an item back out of trash)",
     ),

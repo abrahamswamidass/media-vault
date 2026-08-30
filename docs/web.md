@@ -59,9 +59,13 @@ Unlike exact dedup (`mediavault dedup`, a full-content SHA-256 match, safe
 to auto-archive), a near-duplicate pair often differs in ways that matter —
 one might be the full-resolution original, the other a messenger-app copy —
 so each photo in a group gets its own **Archive** button. Clicking it writes
-a plain `delete` intent for that one photo; the agent picks it up the same
-way it does a "Stage for Amazon" click. Nothing is archived until you
-explicitly click something, one photo at a time.
+a `delete` intent for that one photo; the agent picks it up the same way it
+does a "Stage for Amazon" click. That intent does two things, not just one:
+moves the file to trash *and* removes its Firestore fact, so the photo
+actually disappears from Browse/Map/Folders/People/Duplicates once the
+agent's caught up — not just from the NAS while a stale entry keeps showing
+everywhere. Nothing is archived until you explicitly click something, one
+photo at a time.
 
 ## Activity
 
@@ -75,6 +79,13 @@ from Duplicates (or anywhere else) a safe, reversible click rather than a
 one-way door: every `delete` in this project already moves to trash instead
 of unlinking, and now there's a UI path to undo it without touching the NAS
 by hand.
+
+**Undo brings the file back, but not (yet) its place in the web viewer.**
+The file is genuinely safe and restored on the NAS the moment Undo
+completes, but the photo itself won't reappear in Browse/Map/Folders/People
+until someone runs `publish --force` afterward — undo doesn't automatically
+re-derive the thumbnail/metadata fact it removed on archive (see [agent.md](agent.md)'s
+`--force` note, and the tracking issue for closing this loop automatically).
 
 ## Hiding a folder
 

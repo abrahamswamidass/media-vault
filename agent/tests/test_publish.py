@@ -294,6 +294,23 @@ def test_missing_source_index_fails_validation(tmp_path, catalog, blobs, facts):
     assert "run an index first" in result.error
 
 
+def test_facts_delete_removes_one_items_document(nas, catalog, blobs, facts):
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert fact_file.exists()
+
+    facts.delete("nas", "Photos/real.jpg")
+
+    assert not fact_file.exists()
+
+
+def test_facts_delete_of_an_already_missing_document_is_not_an_error(facts):
+    """Safe to retry: a replayed "delete" intent (see ArchiveItemAction)
+    must not fail just because a previous attempt already removed it."""
+    facts.delete("nas", "never/existed.jpg")  # must not raise
+
+
 def test_purge_facts_deletes_only_the_given_source(nas, catalog, blobs, facts, tmp_path):
     conn = _indexed(nas, catalog)
     PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)

@@ -9,13 +9,15 @@ from __future__ import annotations
 import pytest
 
 from mediavault.actions import (
-    ActionLog, CopyAction, DeleteAction, MoveAction, RestoreAction,
+    ActionLog, ArchiveItemAction, CopyAction, DeleteAction, MoveAction, RestoreAction,
     STATUS_FAILED, STATUS_NOOP, STATUS_OK,
 )
 from mediavault.actions.base import Action
 from mediavault.actions.derive import FetchFullResAction, ThumbnailAction
 from mediavault.connectors.nas import NASConnector
 from mediavault.blobstore import LocalBlobStore, blob_key
+from mediavault.catalog import Catalog
+from mediavault.sync.facts import LocalFactsStore
 
 
 @pytest.fixture
@@ -37,6 +39,26 @@ def staging(tmp_path):
 @pytest.fixture
 def blobs(tmp_path):
     return LocalBlobStore(str(tmp_path / "blobs"))
+
+
+@pytest.fixture
+def facts(tmp_path):
+    return LocalFactsStore(str(tmp_path / "facts"))
+
+
+@pytest.fixture
+def catalog(tmp_path):
+    with Catalog(str(tmp_path / "cat.sqlite")) as c:
+        yield c
+
+
+def _insert_active_item(catalog, source, item_id):
+    catalog.conn.execute(
+        "INSERT INTO items (source, item_id, name, indexed_at, state) "
+        "VALUES (?, ?, ?, '2026-01-01T00:00:00', 'active')",
+        (source, item_id, item_id.rsplit("/", 1)[-1]),
+    )
+    catalog.conn.commit()
 
 
 # --------------------------------------------------------------------------- #
@@ -115,10 +137,13 @@ def test_restore_dry_run_does_not_move_anything(nas):
     assert (nas.trash / "Photos" / "junk.jpg").exists()
 
 
-def test_restore_fails_clearly_when_nothing_is_in_trash(nas):
+def test_restore_of_something_never_deleted_is_a_noop_not_a_failure(nas):
+    """"Nothing in trash" can't be told apart from "already restored" (see
+    test_restore_is_a_noop_when_already_restored) -- both correctly mean
+    nothing needs to happen, not that something is broken."""
     result = RestoreAction("Photos/never_deleted.jpg", nas).run(commit=True)
 
-    assert result.status == STATUS_FAILED
+    assert result.status == STATUS_NOOP
     assert not result.committed
 
 
@@ -133,6 +158,95 @@ def test_restore_refuses_to_overwrite_a_file_at_the_original_location(nas):
 
     assert result.status == STATUS_FAILED
     assert (nas.root / "Photos" / "junk.jpg").read_bytes() == b"a different file now lives here"
+
+
+def test_restore_is_a_noop_when_already_restored(nas):
+    """Replay safety: the web module's Undo button has no way to know a
+    previous click already succeeded (nothing disables it across a page
+    revisit), and at-least-once intent delivery means the same intent can
+    also be re-claimed after a crash. A second restore must report success
+    (no-op), not fail just because there's nothing left in trash."""
+    DeleteAction("Photos/junk.jpg", nas).run(commit=True)
+    RestoreAction("Photos/junk.jpg", nas).run(commit=True)
+
+    result = RestoreAction("Photos/junk.jpg", nas).run(commit=True)
+
+    assert result.status == STATUS_NOOP
+    assert (nas.root / "Photos" / "junk.jpg").exists()
+
+
+# --------------------------------------------------------------------------- #
+# ArchiveItemAction — what the web "delete" intent actually uses: a plain
+# DeleteAction alone would leave the item's Firestore fact behind forever.
+# --------------------------------------------------------------------------- #
+def test_archive_item_removes_both_the_file_and_its_fact(nas, facts):
+    facts.put("nas", "Photos/junk.jpg", {"source": "nas", "item_id": "Photos/junk.jpg"})
+    fact_file = facts.root / "nas__Photos_junk.jpg.json"
+    assert fact_file.exists()
+
+    result = ArchiveItemAction("Photos/junk.jpg", nas, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert not (nas.root / "Photos" / "junk.jpg").exists()
+    assert (nas.trash / "Photos" / "junk.jpg").exists()
+    assert not fact_file.exists()
+
+
+def test_archive_item_still_removes_the_file_when_there_was_no_fact_to_begin_with(nas, facts):
+    """The fact-delete is best-effort in the sense that a missing fact is
+    not an error (see LocalFactsStore.delete()) -- the file move must still
+    happen."""
+    result = ArchiveItemAction("Photos/junk.jpg", nas, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert (nas.trash / "Photos" / "junk.jpg").exists()
+
+
+def test_archive_item_validation_failure_matches_plain_delete(nas, facts):
+    """validate() delegates to DeleteAction's own check -- a missing file
+    fails the same way, before either the fact or the file is touched."""
+    result = ArchiveItemAction("Photos/does_not_exist.jpg", nas, facts).run(commit=True)
+
+    assert result.status == STATUS_FAILED
+    assert "not found" in result.error
+
+
+def test_archive_item_marks_the_catalog_row_archived(nas, facts, catalog):
+    """Same bookkeeping ArchiveDuplicatesAction already does for exact-dedup
+    archiving -- without it, dedup/publish (both filter on state='active')
+    would keep treating a web-archived item as still there."""
+    _insert_active_item(catalog, "nas", "Photos/junk.jpg")
+
+    ArchiveItemAction("Photos/junk.jpg", nas, facts, catalog=catalog).run(commit=True)
+
+    row = catalog.get("nas", "Photos/junk.jpg")
+    assert row["state"] == "archived"
+
+
+def test_restore_marks_the_catalog_row_active_again(nas, catalog):
+    DeleteAction("Photos/junk.jpg", nas).run(commit=True)
+    _insert_active_item(catalog, "nas", "Photos/junk.jpg")
+    catalog.mark_archived("nas", "Photos/junk.jpg")
+
+    RestoreAction("Photos/junk.jpg", nas, catalog=catalog).run(commit=True)
+
+    row = catalog.get("nas", "Photos/junk.jpg")
+    assert row["state"] == "active"
+
+
+def test_restore_replay_stays_a_noop_after_catalog_already_updated(nas, catalog):
+    """A replayed restore (nothing left in trash, since the first attempt
+    already succeeded) must stay a no-op -- and the catalog, already
+    correctly 'active' from that first attempt, stays that way."""
+    DeleteAction("Photos/junk.jpg", nas).run(commit=True)
+    _insert_active_item(catalog, "nas", "Photos/junk.jpg")
+    catalog.mark_archived("nas", "Photos/junk.jpg")
+    RestoreAction("Photos/junk.jpg", nas, catalog=catalog).run(commit=True)
+
+    result = RestoreAction("Photos/junk.jpg", nas, catalog=catalog).run(commit=True)
+
+    assert result.status == STATUS_NOOP
+    assert catalog.get("nas", "Photos/junk.jpg")["state"] == "active"
 
 
 # --------------------------------------------------------------------------- #

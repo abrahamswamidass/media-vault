@@ -282,6 +282,18 @@ class Catalog:
             (source, item_id),
         )
 
+    def mark_active(self, source: str, item_id: str) -> None:
+        """The inverse of mark_archived — RestoreAction's own side of undoing
+        an archive. upsert()'s ON CONFLICT clause deliberately doesn't touch
+        `state`, so a later re-index of the same path won't flip this back
+        on its own; without this, a restored item would stay invisible to
+        dedup/publish (both filter on state='active') even though the file
+        is back at its original location."""
+        self.conn.execute(
+            "UPDATE items SET state = 'active' WHERE source = ? AND item_id = ?",
+            (source, item_id),
+        )
+
     def mark_published(self, source: str, item_id: str) -> None:
         """Flag an item as published (thumbnail + facts pushed). Re-run-proof:
         a later publish pass only looks at rows still missing this."""
