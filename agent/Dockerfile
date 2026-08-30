@@ -81,10 +81,18 @@ ENV NAS_ROOT=/data/nas \
     PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1
 
-# tini = clean signal handling / zombie reaping for a long-lived agent.
+# tini = clean signal handling / zombie reaping for a long-lived agent --
+# matters here specifically because CMD below is itself long-lived, and
+# `docker stop` sends SIGTERM through tini to it (see process-intents
+# --watch's own SIGTERM handler in cli.py).
 ENTRYPOINT ["tini", "--"]
 
-# Default: print the CLI help so `docker run <image>` is self-documenting.
-# Override with any command, e.g.:
-#   docker compose run --rm agent nas list --root /data/nas --prefix Photos
-CMD ["python", "-m", "mediavault.cli", "--help"]
+# Default: watch for web-module requests continuously, so the container
+# does that job the moment it starts — no separate `docker exec -d` step,
+# and `docker stop`/`docker restart` cleanly stop/restart it like any other
+# containerized service. `docker exec` for one-off CLI commands (index,
+# dedup, publish, ...) works exactly the same regardless of what this main
+# process is doing. Override with any other command if you'd rather the
+# container just idle, e.g.:
+#   docker run ... media-vault-agent sleep infinity
+CMD ["python", "-m", "mediavault.cli", "process-intents", "--watch", "--interval", "600"]

@@ -32,7 +32,7 @@ what each command actually touches.
 | `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
 | `process-intents` | Preview what the web module has requested — read-only, claims/runs nothing. |
 | `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. One pass. See [web.md](web.md#staging-a-photo-for-amazon). |
-| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds — run with `docker exec -it` so Ctrl+C actually stops it. |
+| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds. This is the container's own default command (see [setup.md](setup.md)) — you don't normally need to run it yourself. If you do run it manually, use `docker exec -it` so Ctrl+C actually stops it. |
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 | `people-reset --commit` | Wipe all detected faces/people to redo clustering — leaves items, scans, and published facts untouched. |

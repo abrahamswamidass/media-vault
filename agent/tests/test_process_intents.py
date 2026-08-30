@@ -11,6 +11,8 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from mediavault.cli import main
 from mediavault.sync.intents_store import LocalIntentsStore
 
@@ -210,4 +212,42 @@ def test_firestore_reclaim_never_issues_a_query_needing_a_composite_index(monkey
     pending = store.peek_pending()
 
     assert {r["id"] for r in pending} == {"p1", "stale"}
+
+
+# --------------------------------------------------------------------------- #
+# --watch — the container's own default command, so it has to stop cleanly
+# on docker stop's SIGTERM, not just Ctrl+C's SIGINT.
+# --------------------------------------------------------------------------- #
+def test_stop_on_sigterm_raises_keyboard_interrupt():
+    """Direct test of the handler's own logic, not real OS signal delivery —
+    os.kill(pid, SIGTERM) doesn't reliably invoke a Python signal handler on
+    Windows (it hard-kills the process instead), so this calls the handler
+    the same way Python's signal machinery itself would: as a plain
+    (signum, frame) callback."""
+    import signal
+
+    from mediavault.cli import _stop_on_sigterm
+
+    with pytest.raises(KeyboardInterrupt):
+        _stop_on_sigterm(signal.SIGTERM, None)
+
+
+def test_watch_loop_stops_cleanly_when_sigterm_arrives(tmp_path, monkeypatch, capsys):
+    """Full integration of the loop with the handler: simulates SIGTERM
+    arriving during the sleep between polls (exactly where `docker stop`
+    would catch it) and confirms the loop exits via the same clean path
+    Ctrl+C already used, not an unhandled crash."""
+    import mediavault.cli as cli_mod
+
+    db, intents_dir, amazon = _setup(tmp_path, monkeypatch)
+
+    def sleep_delivers_sigterm(seconds):
+        cli_mod._stop_on_sigterm(0, None)
+    monkeypatch.setattr(cli_mod.time, "sleep", sleep_delivers_sigterm)
+
+    args = _common_args(db, intents_dir, tmp_path, commit=True)
+    args += ["--watch", "--interval", "600"]
+
+    assert main(args) == 0
+    assert "Stopped." in capsys.readouterr().out
 

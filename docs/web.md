@@ -100,42 +100,40 @@ workaround.
 
 Works from Browse or Map's own photo view (click a photo → "Stage for
 Amazon"). That button only *writes a request* — the web module can't touch
-the NAS itself (see `CLAUDE.md`'s three rules). The agent has to actually
-pick it up:
-```powershell
-docker exec media-vault-container python -m mediavault.cli process-intents --commit
-```
-That's a single pass — run it whenever, or put it on the same schedule as
-`index`/`publish` (see [agent.md](agent.md)).
-
-**To pick up requests automatically without a manual run each time, use
-`--watch`** — it polls Firestore every `--interval` seconds (default 600 = 10
-min) instead of exiting after one pass. Each poll is one small Firestore
-query, so even at a 10-minute interval this is nowhere near Firestore's free
-read quota — effectively $0/month regardless of how long it runs:
-```powershell
-docker exec -it media-vault-container python -m mediavault.cli process-intents --watch --interval 600
-```
-**The `-it` matters.** Without it, Ctrl+C only kills the local `docker exec`
-client, not the polling loop inside the container — it silently keeps running
-as an orphaned background process, the same trap a stray `dedup --commit`
-can fall into (see [agent.md](agent.md)'s dedup notes). With `-it`, Ctrl+C
-reaches the process directly and it stops cleanly, no orphan left behind.
+the NAS itself (see `CLAUDE.md`'s three rules). The agent picks it up on its
+own: `process-intents --watch` is the container's default command (see
+[setup.md](setup.md)), polling every 10 minutes for anything the web module
+has asked for — not just Amazon staging, every intent type (`fetch_fullres`,
+`delete`, `restore`, `copy`, `index`, `dedup_source`, `publish`,
+`stage_for_amazon`). Each poll is one small Firestore query, so this costs
+effectively $0/month regardless of how long it runs. Nothing to start by
+hand under normal operation.
 
 The **Amazon** tab is read-only — it lists what's been requested and its
 current status (waiting / working / staged / failed), not a picker of its
 own.
 
-**A green/red dot in the page header** shows whether `process-intents
---watch` is actually running — it's not Amazon-specific since the watch loop
-processes every intent type (fetch_fullres, delete, copy, index,
-dedup_source, publish, stage_for_amazon, ...), so it lives in the shared
-header instead of one tab. `--watch` writes a heartbeat
-(`agent_status/process_intents`: last-poll time + pending count) each time
-it polls; the dot goes red if that heartbeat is more than 20 minutes old or
-missing entirely — meaning nothing is currently watching, so any request
-(not just Amazon staging) would just sit pending until someone runs
-`process-intents` by hand.
+**A green/red dot in the page header** shows whether the watch loop is
+actually running right now — useful because the container's default command
+*can* be overridden (see setup.md), or the container could simply be
+stopped. `--watch` writes a heartbeat (`agent_status/process_intents`:
+last-poll time + pending count) each time it polls; the dot goes red if that
+heartbeat is more than 20 minutes old or missing entirely — meaning any
+request, of any type, would just sit pending until the container (or a
+manual `process-intents --commit`) picks it up.
+
+**If you ever do need to run it by hand** — the container was started with
+`sleep infinity` instead, or you're troubleshooting — use `docker exec -it`,
+not a bare `docker exec`:
+```powershell
+docker exec -it media-vault-container python -m mediavault.cli process-intents --watch --interval 600
+```
+**The `-it` matters.** Without it, Ctrl+C only kills the local `docker exec`
+client, not the polling loop inside the container — it silently keeps
+running as an orphaned background process, the same trap a stray `dedup
+--commit` can fall into (see [agent.md](agent.md)'s dedup notes). With
+`-it`, Ctrl+C reaches the process directly and it stops cleanly, no orphan
+left behind.
 
 ## Add it to your phone's home screen
 

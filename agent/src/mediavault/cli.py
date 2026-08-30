@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -576,6 +577,14 @@ def _process_intents_once(args, intents_store, catalog) -> tuple[int, int]:
     return done, failed
 
 
+def _stop_on_sigterm(signum, frame):
+    """`docker stop` sends SIGTERM, not the SIGINT Ctrl+C sends — routed to
+    the same KeyboardInterrupt process-intents --watch's own try/except
+    already catches, so either one breaks the loop cleanly instead of
+    waiting out Docker's stop grace period and getting SIGKILLed mid-poll."""
+    raise KeyboardInterrupt
+
+
 def cmd_process_intents(args) -> int:
     intents_store = _intents_for(args)
 
@@ -595,10 +604,16 @@ def cmd_process_intents(args) -> int:
             _, failed = _process_intents_once(args, intents_store, catalog)
             return 0 if failed == 0 else 1
 
-        # --watch: poll forever until Ctrl+C. Run this in the foreground
-        # (`docker exec -it ...`) -- without -it, SIGINT never reaches the
-        # process inside the container and it keeps polling as an orphan,
-        # the same trap a stray `dedup --commit` fell into before.
+        # --watch: poll forever until stopped. Run in the foreground via
+        # `docker exec -it ...` for Ctrl+C (SIGINT) -- without -it, SIGINT
+        # never reaches the process inside the container and it keeps
+        # polling as an orphan, the same trap a stray `dedup --commit` fell
+        # into before. As the container's own CMD (see Dockerfile), it's
+        # PID 1's child under tini, and `docker stop` sends SIGTERM instead
+        # of SIGINT -- routed to the same KeyboardInterrupt handler below so
+        # either signal breaks the loop cleanly rather than waiting out
+        # Docker's stop grace period and getting SIGKILLed mid-poll.
+        signal.signal(signal.SIGTERM, _stop_on_sigterm)
         print(f"Watching for intents every {args.interval}s. Ctrl+C to stop.")
         try:
             while True:

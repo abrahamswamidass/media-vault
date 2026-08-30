@@ -41,8 +41,7 @@ docker run -d --name media-vault-container --user root `
   -e 'NAS_PASSWORD=your-password-here' `
   -v "C:\mediavault\catalog:/data/catalog" `
   -v "C:\mediavault\secrets:/secrets" `
-  ghcr.io/abrahamswamidass/media-vault/agent:latest `
-  sleep infinity
+  ghcr.io/abrahamswamidass/media-vault/agent:latest
 ```
 
 Notes:
@@ -72,8 +71,17 @@ Notes:
   `/secrets` for credential files (e.g. the GCS service-account key used
   in [agent.md](agent.md)). Create it first if it doesn't exist. Safe to
   mount even if empty.
-- `sleep infinity` keeps the container running so you can `exec` into it
-  repeatedly instead of creating a new container per command.
+- No trailing command is needed: the image's own default (see the
+  Dockerfile) is `process-intents --watch --interval 600`, so the container
+  starts polling for web-module requests immediately and keeps running —
+  you can still `exec` into it repeatedly for one-off commands (`index`,
+  `dedup`, `publish`, ...) the same way regardless of what its main process
+  is doing. This is safe to leave running even before any cloud config is
+  set up — with no Firestore configured yet, it just polls an empty local
+  intents folder every 10 minutes, effectively free either way. `docker
+  stop`/`docker restart` cleanly stop and restart the watcher along with the
+  container. Append ` sleep infinity` instead if you'd rather the container
+  just idle and drive everything by hand via `process-intents --commit`.
 
 No volume mount or extra env var is needed for Amazon staging beyond
 `AMAZON_SMB_ROOT` above — it goes over the same SMB connection as the NAS.
