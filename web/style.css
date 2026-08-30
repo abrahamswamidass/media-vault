@@ -128,6 +128,55 @@ nav a.active {
   margin: 1rem auto;
 }
 
+.dup-group {
+  margin-bottom: 2rem;
+}
+
+.dup-group h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #ccc;
+  margin: 0 0 0.75rem;
+}
+
+.dup-card {
+  display: flex;
+  flex-direction: column;
+  cursor: default; /* only the image itself opens the modal, not the whole card */
+}
+
+.dup-card img {
+  cursor: pointer;
+}
+
+.dup-archive {
+  margin: 0.5rem;
+  background: #2a1a1a;
+  border: 1px solid #7a3a3a;
+  color: #d97070;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.dup-archive:hover:not(:disabled) {
+  border-color: #d97070;
+  color: #eee;
+}
+
+.dup-archive:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.dup-archive-status {
+  margin: 0 0.5rem 0.5rem;
+  font-size: 0.7rem;
+  color: #999;
+}
+
 .folders-toolbar {
   display: flex;
   align-items: center;
@@ -552,6 +601,83 @@ nav a.active {
 .amazon-status-done { color: #6dbf6d; }
 .amazon-status-failed { color: #d97070; }
 .amazon-status-pending, .amazon-status-claimed { color: #999; }
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 40rem;
+}
+
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #1c1c1c;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.activity-row-info {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
+  align-items: baseline;
+}
+
+.activity-row-type {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #7fb2ff;
+}
+
+.activity-row-when {
+  font-size: 0.7rem;
+  color: #666;
+  justify-self: end;
+}
+
+.activity-row-item {
+  grid-column: 1 / -1;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.activity-row-status {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+}
+
+.activity-status-done { color: #6dbf6d; }
+.activity-status-failed { color: #d97070; }
+.activity-status-pending, .activity-status-claimed { color: #999; }
+
+.activity-undo {
+  flex-shrink: 0;
+  background: #16233a;
+  border: 1px solid #2b6cb0;
+  color: #7fb2ff;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+.activity-undo:hover:not(:disabled) {
+  border-color: #4da3ff;
+  color: #eee;
+}
+
+.activity-undo:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 
 .agent-heartbeat {
   display: flex;

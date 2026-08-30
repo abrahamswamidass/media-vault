@@ -14,10 +14,11 @@ import * as foldersView from "./views/folders.js";
 import * as peopleView from "./views/people.js";
 import * as duplicatesView from "./views/duplicates.js";
 import * as amazonView from "./views/amazon.js";
+import * as activityView from "./views/activity.js";
 
 const VIEWS = {
   browse: browseView, map: mapView, folders: foldersView, people: peopleView,
-  duplicates: duplicatesView, amazon: amazonView,
+  duplicates: duplicatesView, amazon: amazonView, activity: activityView,
 };
 const DEFAULT_VIEW = "browse";
 

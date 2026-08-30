@@ -19,9 +19,10 @@ into the same NAS folder structure the agent indexed — Firestore has no real
 hierarchy, so "folders" are computed on the fly from item_id path segments as
 each page loads, the same client-side, paginated approach Browse uses for
 "Load more"), and **People** (see below). Right of the divider: **Duplicates**
-(stub) and **Amazon** (read-only staging status) — maintenance/status tools,
-not library views. Clicking a photo in Browse, Folders, or People opens the
-same modal (they share one instance — see `CLAUDE.md`'s web/ section).
+(near-duplicate review, see below), **Amazon** (read-only staging status),
+and **Activity** (see below) — maintenance/status tools, not library views.
+Clicking a photo in Browse, Folders, People, or Duplicates opens the same
+modal (they share one instance — see `CLAUDE.md`'s web/ section).
 
 ## People
 
@@ -40,6 +41,40 @@ writes to the local SQLite catalog, not Firestore, so a name given that way
 doesn't reach this tab at all. Bridging that gap (letting a name entered
 here, or given via the CLI, show up consistently in both places) is tracked
 as a separate issue rather than folded into this view.
+
+## Duplicates
+
+Groups visually similar photos for review — a resize, a re-compression, a
+burst-sequence shot — from the perceptual hash (`phash`) `publish` writes
+for every photo (see [agent.md](agent.md), no live switch, always on). Same
+client-side-scan shape as People: Firestore can't ask "items within Hamming
+distance N of each other," so this scans a bounded window of recent items
+and buckets ones whose hash is close *and* whose capture time falls within
+an hour of each other — near-duplicates are almost always from the same
+event, so the time window keeps this cheap and matches how they actually
+occur, rather than comparing every item against every other one.
+
+**Review-only, deliberately — nothing here ever auto-picks a "keeper."**
+Unlike exact dedup (`mediavault dedup`, a full-content SHA-256 match, safe
+to auto-archive), a near-duplicate pair often differs in ways that matter —
+one might be the full-resolution original, the other a messenger-app copy —
+so each photo in a group gets its own **Archive** button. Clicking it writes
+a plain `delete` intent for that one photo; the agent picks it up the same
+way it does a "Stage for Amazon" click. Nothing is archived until you
+explicitly click something, one photo at a time.
+
+## Activity
+
+History of every intent the web module has written, any type — not scoped
+to Amazon staging the way the Amazon tab is. Each row shows what was
+requested, its status, and when. **A completed `delete` gets an Undo
+button** — clicking it writes a fresh `restore` intent for the same item,
+which the agent's `restore()` turns into moving the file back out of trash
+(NAS) or clearing Drive's own trashed flag. This is what makes archiving
+from Duplicates (or anywhere else) a safe, reversible click rather than a
+one-way door: every `delete` in this project already moves to trash instead
+of unlinking, and now there's a UI path to undo it without touching the NAS
+by hand.
 
 ## Hiding a folder
 

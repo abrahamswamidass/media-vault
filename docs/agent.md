@@ -25,6 +25,7 @@ what each command actually touches.
 | `reset --all --commit` | Same, for every source. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
 | `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
+| `nas restore "<path>" --commit` | Undo a soft delete — move a file back out of trash to where it came from. Works on `drive` too (clears Drive's own trashed flag). What the web Activity tab's Undo button asks for behind the scenes. |
 | `drive-login` | One-time interactive OAuth grant — see [Google Drive](#google-drive-optional). |
 | `index drive` | Resumable walk into the catalog, same as `index nas`. Needs `DRIVE_LIVE=1` and a saved token. |
 | `dedup drive [--commit]` | Preview / archive Drive duplicates — same flags as `dedup nas` (`--by-folder`, `--debug`, `--max-groups`, ...). |
@@ -238,7 +239,18 @@ archived, because sharing a size and both end-chunks is not proof of being
 identical. Archived copies **move** (not copy) into trash — the NAS trash
 folder, or Drive's 30-day trash — preserving their relative path, so trash
 grows its own mirrored subfolder structure as things get archived. Fully
-recoverable by moving a file back to where it came from.
+recoverable — `nas restore "<path>" --commit` (or Drive's own equivalent)
+moves a file back out of trash to exactly where it came from, deterministic
+from the same relative-path mirroring; the web Activity tab's Undo button
+does the same thing without touching a terminal.
+
+**Near-duplicates — a resize, a re-compression, a burst shot — are a
+different, separate feature**, not this command: `dedup` only ever
+auto-archives an *exact* full-content match. Visually-similar-but-not-
+identical photos are grouped for manual review in the web module's
+Duplicates tab (see [web.md](web.md#duplicates)), from the `phash`
+`publish` writes for every photo — never auto-archived, since picking the
+wrong one of a near-duplicate pair can destroy the better file.
 
 Two files sharing a size and matching first/last 64 KB but genuinely
 differing in the middle (a coincidental fingerprint collision — RAW files
