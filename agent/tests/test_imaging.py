@@ -22,6 +22,7 @@ PIL = pytest.importorskip("PIL", reason="needs Pillow (imaging extra)")
 from PIL import Image  # noqa: E402
 
 pillow_heif = pytest.importorskip("pillow_heif", reason="needs pillow-heif (imaging extra)")
+imagehash = pytest.importorskip("imagehash", reason="needs ImageHash (imaging extra)")
 
 from mediavault import imaging  # noqa: E402
 
@@ -63,6 +64,56 @@ def test_still_decodes_plain_jpeg_after_heif_registration():
 
     with Image.open(io.BytesIO(out)) as im:
         assert im.format == "WEBP"
+
+
+# --------------------------------------------------------------------------- #
+# phash() — near-duplicate grouping (web Duplicates tab), review-only
+# --------------------------------------------------------------------------- #
+def _jpeg(im, quality=90) -> bytes:
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
+def _hamming(hex_a: str, hex_b: str) -> int:
+    return bin(int(hex_a, 16) ^ int(hex_b, 16)).count("1")
+
+
+def _gradient_image(size=(200, 200)):
+    """A real gradient, not a flat color — dhash compares adjacent-pixel
+    brightness, so a single flat color hashes to all-identical bits and
+    can't distinguish "similar" from "different" in a meaningful test."""
+    im = Image.new("RGB", size)
+    for x in range(size[0]):
+        shade = int(255 * x / size[0])
+        for y in range(size[1]):
+            im.putpixel((x, y), (shade, shade, shade))
+    return im
+
+
+def test_phash_returns_a_64_bit_hex_hash():
+    out = imaging.phash(_jpeg(_gradient_image()))
+
+    assert len(out) == 16  # 64 bits, 4 bits/hex digit
+    int(out, 16)  # doesn't raise — a valid hex string
+
+
+def test_phash_is_close_for_a_recompressed_near_duplicate():
+    """The actual use case: a resize/re-compression of the same photo
+    (a messenger-app copy, a re-export) must land close in Hamming
+    distance so it groups with the original."""
+    im = _gradient_image()
+    original = imaging.phash(_jpeg(im, quality=95))
+    recompressed = imaging.phash(_jpeg(im, quality=40))
+
+    assert _hamming(original, recompressed) <= 4
+
+
+def test_phash_is_far_for_visually_different_images():
+    a = imaging.phash(_jpeg(_gradient_image()))
+    b = imaging.phash(_jpeg(Image.new("RGB", (200, 200), color=(20, 200, 60))))
+
+    assert _hamming(a, b) >= 16
 
 
 # --------------------------------------------------------------------------- #

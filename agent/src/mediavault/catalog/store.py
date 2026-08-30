@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS items (
     focal_length_35mm TEXT,
     metering_mode TEXT,
     flash       TEXT,
+    phash       TEXT,
     PRIMARY KEY (source, item_id)
 );
 
@@ -154,6 +155,7 @@ class Catalog:
             "ALTER TABLE items ADD COLUMN focal_length_35mm TEXT",
             "ALTER TABLE items ADD COLUMN metering_mode TEXT",
             "ALTER TABLE items ADD COLUMN flash TEXT",
+            "ALTER TABLE items ADD COLUMN phash TEXT",
         ):
             try:
                 self.conn.execute(ddl)
@@ -309,6 +311,16 @@ class Catalog:
              exif.get("exposure_compensation"), exif.get("focal_length"),
              exif.get("focal_length_35mm"), exif.get("metering_mode"),
              exif.get("flash"), source, item_id),
+        )
+
+    def set_phash(self, source: str, item_id: str, phash: str) -> None:
+        """Record a perceptual hash pulled from the full decoded image (see
+        imaging.py's phash()). Computed once and persisted — unlike EXIF's
+        cheap head-read, this needs the whole file, so a later publish reuses
+        the stored value instead of paying that cost again."""
+        self.conn.execute(
+            "UPDATE items SET phash = ? WHERE source = ? AND item_id = ?",
+            (phash, source, item_id),
         )
 
     def reset(self, source: str | None = None) -> dict:

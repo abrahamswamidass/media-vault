@@ -102,6 +102,32 @@ def preview(data: bytes) -> bytes:
     return downscale(data, PREVIEW_MAX_EDGE, fmt="JPEG", quality=85)
 
 
+def phash(data: bytes) -> str:
+    """A 64-bit perceptual hash (difference hash) as a hex string.
+
+    Visually similar images — a resize, a re-compression, a burst-sequence
+    shot taken a second apart — land close together in Hamming distance;
+    visually different images land far apart. This is the "near" half of
+    dedup.py's exact/near distinction: review-only grouping, never an
+    automatic action, since picking the wrong one of a near-duplicate pair
+    (a full-res original vs. a messenger-app recompression) destroys the
+    better file.
+
+    imagehash is a soft-optional import like Pillow itself.
+    """
+    Image = _pillow()
+    try:
+        import imagehash  # noqa: PLC0415 — optional dependency, imported on use
+    except ImportError as e:  # pragma: no cover - depends on install profile
+        raise ImagingUnavailable(
+            "ImageHash is required for perceptual hashing. "
+            "pip install ImageHash (already listed in requirements.txt)."
+        ) from e
+
+    with Image.open(io.BytesIO(data)) as im:
+        return str(imagehash.dhash(im))
+
+
 def frame(data: bytes, suffix: str = "") -> bytes:
     """One representative frame from a video, as JPEG bytes ready for
     downscale()/thumbnail()/preview() to pick up like any photo.

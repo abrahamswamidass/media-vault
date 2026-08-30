@@ -89,6 +89,10 @@
       "type": "array", "items": { "type": "string" },
       "description": "Ids into the people collection, one per distinct face-cluster detected in this item (photos only). Opaque ids only -- no face embeddings or bounding boxes are ever published here; those stay in the agent's local catalog. Empty unless FACES_LIVE was on when this item was published."
     },
+    "phash": {
+      "type": ["string", "null"],
+      "description": "64-bit perceptual (difference) hash, hex string, photos only. Items whose hash lands close together (small Hamming distance) are visually similar -- a resize, a re-compression, a burst-sequence shot -- and are grouped for review in the web module's Duplicates tab. Never used to auto-archive anything; only a full-content SHA-256 match does that (see dedup.py)."
+    },
     "indexed_at": {
       "type": "string",
       "format": "date-time",

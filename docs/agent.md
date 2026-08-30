@@ -182,6 +182,15 @@ EXIF. Reading further to chase it would mean downloading arbitrarily large
 video files just for a number, which is exactly what this project avoids
 everywhere else (see the dedup confirmation notes above).
 
+**Every photo also gets a perceptual hash** (`phash` — a 64-bit difference
+hash, images only) for the web module's Duplicates tab to group visually
+similar photos (a resize, a re-compression, a burst-sequence shot) for
+review. Unlike EXIF's cheap head-read, this needs the whole file decoded —
+the same read `FACES_LIVE` needs, so the two share one full-content read
+instead of each paying for their own. Always on for images (no live switch;
+cheap relative to face detection), and computed once — a `--force`
+republish reuses the stored value rather than re-decoding an unchanged file.
+
 **Already-published items are skipped on a normal run** — that's what makes
 re-runs cheap, but it also means a fact field added after your library was
 first published (like GPS, above) won't show up on old items just by running

@@ -15,7 +15,7 @@ import os
 from pathlib import PurePosixPath
 from typing import Optional
 
-from .. import faces, metadata
+from .. import faces, imaging, metadata
 from ..blobstore import blob_key
 from ..catalog import assign_person, dedup as dedup_mod, scanner
 from ..catalog.store import Catalog
@@ -251,16 +251,17 @@ class PublishAction(Action):
                 if exif:
                     self.catalog.set_exif(self.source, item_id, exif)
 
-                # Faces, like EXIF, are a bonus — never block publishing.
-                # Gated behind FACES_LIVE (off by default, like every other
-                # live switch here) since the first real run needs to
-                # download model weights and costs real CPU time per image.
-                # Images only: insightface can't do anything useful with a
-                # video frame, and this needs the FULL file (unlike EXIF's
-                # bounded head read) since a face model has to decode the
-                # whole image, not peek at its header.
-                #
-                # Idempotent per item: without this check, a `--force`
+                # Faces and the perceptual hash both need the FULL image
+                # decoded (unlike EXIF's bounded head read), so their reads
+                # are consolidated into one — reading the file twice for two
+                # bonus fields would double the NAS traffic for nothing.
+                mime = row["mime"] or ""
+                is_image = mime.startswith("image/")
+
+                # Faces are a bonus — never block publishing. Gated behind
+                # FACES_LIVE (off by default, like every other live switch
+                # here) since it costs real CPU time per image. Idempotent
+                # per item: without the `not existing` check, a `--force`
                 # re-run (e.g. to backfill GPS on already-published items)
                 # would re-detect every face on every republished item,
                 # duplicating rows in `faces` and re-paying the compute cost
@@ -268,8 +269,32 @@ class PublishAction(Action):
                 existing = self.catalog.faces_for_item(self.source, item_id)
                 person_ids: list[str] = sorted({
                     str(f["person_id"]) for f in existing if f["person_id"] is not None})
-                mime = row["mime"] or ""
-                if not existing and os.getenv("FACES_LIVE", "0") == "1" and mime.startswith("image/"):
+                need_faces = not existing and os.getenv("FACES_LIVE", "0") == "1" and is_image
+
+                # Perceptual hash: also a bonus, always-on for images (cheap
+                # relative to face detection, no model/live-switch needed) —
+                # for near-duplicate review grouping in the web module, see
+                # imaging.phash(). Computed once and persisted; a later
+                # publish (even --force) reuses the stored value rather than
+                # re-reading and re-decoding the file for an unchanged hash.
+                phash = row["phash"]
+                need_phash = phash is None and is_image
+
+                full = None
+                if need_faces or need_phash:
+                    try:
+                        full = self.connector.read(item_id)
+                    except Exception:
+                        full = None
+
+                if full is not None and need_phash:
+                    try:
+                        phash = imaging.phash(full)
+                        self.catalog.set_phash(self.source, item_id, phash)
+                    except Exception:
+                        pass
+
+                if full is not None and need_faces:
                     on_match = None
                     if self.debug:
                         def on_match(best_id, best_dist, matched, _item_id=item_id):
@@ -278,7 +303,6 @@ class PublishAction(Action):
                             print(f"    face in {_item_id}: nearest dist {dist_str} "
                                   f"-> {outcome}", flush=True)
                     try:
-                        full = self.connector.read(item_id)
                         for face in faces.detect_faces(full):
                             person_id = assign_person(self.catalog, face["embedding"], on_match=on_match)
                             self.catalog.add_face(
@@ -309,6 +333,7 @@ class PublishAction(Action):
                     "metering_mode": exif.get("metering_mode"),
                     "flash": exif.get("flash"),
                     "person_ids": person_ids,
+                    "phash": phash,
                 })
                 self.catalog.mark_published(self.source, item_id)
                 published.append(item_id)

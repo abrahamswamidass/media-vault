@@ -453,4 +453,71 @@ def test_face_detection_is_idempotent_on_force_republish(nas, catalog, blobs, fa
     PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
 
     assert fake_insightface["calls"] == 1  # not called again
+
+
+# --------------------------------------------------------------------------- #
+# Perceptual hash — near-duplicate grouping (web Duplicates tab), always-on
+# for images, no live switch needed (cheap, unlike face detection).
+# --------------------------------------------------------------------------- #
+def test_publish_computes_and_stores_a_phash_for_a_photo(nas, catalog, blobs, facts):
+    from mediavault import imaging
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    row = catalog.get("nas", "Photos/real.jpg")
+    assert row["phash"] == imaging.phash(_jpeg_bytes())
+    fact_file = facts.root / "nas__Photos_real.jpg.json"
+    assert row["phash"] in fact_file.read_text()
+
+
+def test_phash_is_reused_not_recomputed_on_force_republish(nas, catalog, blobs, facts, monkeypatch):
+    """Unlike EXIF's cheap head-read, phash needs the whole file decoded —
+    a --force republish (e.g. to backfill GPS) must reuse the stored value,
+    not pay that cost again for an unchanged file."""
+    conn = _indexed(nas, catalog)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    first = catalog.get("nas", "Photos/real.jpg")["phash"]
+
+    def must_not_be_called(*_a, **_k):
+        raise AssertionError("phash() must not run again once already stored")
+    monkeypatch.setattr("mediavault.actions.maintenance.imaging.phash", must_not_be_called)
+
+    PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
+
+    assert catalog.get("nas", "Photos/real.jpg")["phash"] == first
+
+
+def test_phash_skips_non_image_items(nas, catalog, blobs, facts):
+    (nas / "clip.mov").write_bytes(b"not really a video, just needs a mov extension")
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert catalog.get("nas", "clip.mov")["phash"] is None
+
+
+def test_faces_and_phash_share_one_full_read_not_two(nas, catalog, blobs, facts,
+                                                      fake_insightface, monkeypatch):
+    """Both need the full decoded image — reading the file twice for two
+    bonus fields would double NAS traffic for nothing."""
+    import numpy as np
+    monkeypatch.setenv("FACES_LIVE", "1")
+    fake_insightface["faces"] = [_FakeDetectedFace(
+        (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.9)]
+    conn = _indexed(nas, catalog)
+
+    full_reads = []
+    real_read = conn.read
+    def counting_read(item_id, nbytes=0):
+        if not nbytes:
+            full_reads.append(item_id)
+        return real_read(item_id, nbytes)
+    monkeypatch.setattr(conn, "read", counting_read)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert full_reads == ["Photos/real.jpg"]  # exactly one full read, not two
+    assert catalog.get("nas", "Photos/real.jpg")["phash"] is not None
+    assert fake_insightface["calls"] == 1
     assert len(catalog.faces_for_item("nas", "Photos/real.jpg")) == 1  # not duplicated
