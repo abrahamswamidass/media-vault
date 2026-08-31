@@ -127,6 +127,7 @@
             <th>NAS / Drive files</th>
             <th>SQLite catalog</th>
             <th>Blob store<br>(thumbnails)</th>
+            <th>Cold storage<br>(originals)</th>
             <th>Firestore<br><code class="inl">items/</code></th>
             <th>Firestore<br><code class="inl">intents/</code></th>
             <th>Firestore<br><code class="inl">agent_status/</code></th>
@@ -137,48 +138,69 @@
             <td class="rowhead">doctor</td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">index &lt;source&gt;</td>
             <td><span class="m m-r">R</span></td><td><span class="m m-w">W</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">stats</td>
             <td><span class="m m-none">–</span></td><td><span class="m m-r">R</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">dedup &lt;source&gt; <span class="tag tag-dry">preview</span></td>
             <td><span class="m m-r">R</span></td><td><span class="m m-w">W*</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">dedup &lt;source&gt; --commit <span class="tag tag-commit">mutates</span></td>
             <td><span class="m m-wr">W↩</span></td><td><span class="m m-w">W</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">publish &lt;source&gt; <span class="tag tag-dry">preview</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">publish &lt;source&gt; --commit <span class="tag tag-commit">mutates</span></td>
             <td><span class="m m-r">R</span></td><td><span class="m m-w">W</span></td>
-            <td><span class="m m-w">W</span></td><td><span class="m m-w">W</span></td>
+            <td><span class="m m-w">W</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-w">W</span></td>
+            <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+          </tr>
+          <tr>
+            <td class="rowhead">cold-archive &lt;source&gt; <span class="tag tag-dry">preview</span></td>
+            <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+          </tr>
+          <tr>
+            <td class="rowhead">cold-archive &lt;source&gt; --commit <span class="tag tag-commit">mutates</span></td>
+            <td><span class="m m-r">R</span></td><td><span class="m m-w">W¶</span></td>
+            <td><span class="m m-none">–</span></td><td><span class="m m-w">W</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">reset &lt;source&gt; --commit <span class="tag tag-commit">mutates</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-wr">W↩†</span></td>
-            <td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-w">W‡</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
@@ -186,47 +208,54 @@
             <td class="rowhead">amazon-stage / amazon upload --commit <span class="tag tag-commit">mutates</span></td>
             <td><span class="m m-w">W</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">nas restore / drive restore --commit <span class="tag tag-commit">mutates, reversible</span></td>
             <td><span class="m m-w">W↩</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">drive-login</td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">process-intents <span class="tag tag-dry">preview</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-r">R</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">process-intents --commit <span class="tag tag-commit">mutates§</span></td>
             <td><span class="m m-w">W§</span></td><td><span class="m m-w">W§</span></td>
-            <td><span class="m m-w">W§</span></td><td><span class="m m-w">W§</span></td>
+            <td><span class="m m-w">W§</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-w">W§</span></td>
             <td><span class="m m-w">W</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">process-intents --watch</td>
-            <td colspan="4" style="color:var(--mut);font-size:11.5px">same as --commit, looped</td>
+            <td colspan="5" style="color:var(--mut);font-size:11.5px">same as --commit, looped</td>
             <td><span class="m m-w">W</span></td><td><span class="m m-w">W</span></td>
           </tr>
           <tr>
             <td class="rowhead">people / people-rename</td>
             <td><span class="m m-none">–</span></td><td><span class="m m-r">R/W</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
           <tr>
             <td class="rowhead">people-reset --commit <span class="tag tag-commit">mutates</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-w">W</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
+            <td><span class="m m-none">–</span></td>
             <td><span class="m m-none">–</span></td><td><span class="m m-none">–</span></td>
           </tr>
         </tbody>
@@ -247,7 +276,9 @@
         ‡ only with <code class="inl">--purge-facts</code>.<br>
         § the actual columns written depend on which intent type was claimed — <code class="inl">stage_for_amazon</code>
         only touches NAS files, <code class="inl">publish</code> touches catalog/blobs/items, <code class="inl">delete</code>
-        only touches the source connector, and so on. This row shows the union across every intent type in the registry.
+        only touches the source connector, and so on. This row shows the union across every intent type in the registry.<br>
+        ¶ sets <code class="inl">cold_archived_at</code> on each row pushed — a separate bucket from the thumbnail
+        blob store, on a lifecycle policy meant to keep objects (no daily-expiry rule), not the previews one.
       </p>
     </div>
   </section>

@@ -308,6 +308,21 @@ Without `GCS_LIVE=1`, it writes to a local folder instead
 (`--coldstore-dir`, or `COLDSTORE_CACHE`), same live-switch every other
 cloud-facing command uses.
 
+**Creating the bucket** (Cloud Storage → Create bucket in the GCP Console):
+- **Location type: Region** (not Multi-region) — Archive-class pricing on a
+  single region runs roughly a quarter of the same class on multi-region,
+  and off-site backup data doesn't need multi-region's global-access
+  guarantees.
+- **Storage class: Archive** as the default class (not Standard/Autoclass).
+- **Public access prevention: enforced**, **Access control: Uniform** — same
+  private-bucket defaults as the main `GCS_BUCKET`.
+- **No lifecycle rule** — unlike `previews/` in the main bucket, archived
+  originals are meant to stay, not expire after a day.
+- The same service account already granted *Storage Object Admin* for
+  `GCS_BUCKET` can be reused here (grant it on this bucket too), no separate
+  key needed. Then add `COLD_STORAGE_BUCKET=your-cold-bucket-name` to the
+  `docker run` command alongside the existing `GCS_*` env vars.
+
 Objects are keyed by NAS-relative path (`archive/<path>`), not content
 hash — unlike thumbnails, a backup you might browse in the GCS Console a
 year from now should read like the folder it came from.

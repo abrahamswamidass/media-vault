@@ -99,7 +99,12 @@ is a circular import — that already happened once.
   `quick_hash`: `thumbs/<hash>.webp`, `previews/<variant>/<hash>.<ext>`. This is
   what makes uploads idempotent, collapses duplicates, and survives renames. It
   is also the idempotency guarantee for replayed intents — a repeat fetch finds
-  the blob present and returns `no-op` without touching the NAS.
+  the blob present and returns `no-op` without touching the NAS. **Cold storage
+  is the deliberate exception** — full originals pushed to a separate Archive-
+  class bucket (`cold-archive`, agent/actions/coldstorage.py) are keyed by
+  NAS-relative path instead, so the bucket stays human-browsable years later.
+  Idempotency there comes from a `cold_archived_at` catalog column plus an
+  exists-check before upload, not from the key itself.
 - **`quick_hash` never reads a whole file.** Size + SHA-1 of first and last 64 KB.
   Reading 1 TB over a network mount to hash it is not acceptable.
 - **Previews expire, thumbnails don't.** A GCS lifecycle rule empties `previews/`
@@ -147,7 +152,7 @@ entire surface area the web module gets; anything not in it is refused.
 
 ```bash
 cd agent
-python -m pytest tests/ -q                     # 27 tests, no cloud account needed
+python -m pytest tests/ -q                     # 120+ tests, no cloud account needed
 PYTHONPATH=src python -m mediavault.cli doctor
 
 # via Docker, from the repo root:
