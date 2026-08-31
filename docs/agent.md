@@ -21,6 +21,9 @@ what each command actually touches.
 | `publish nas --commit` | Actually push them (local files without `GCS_LIVE=1`, real GCS/Firestore with it). |
 | `publish nas --force --commit` | Also republish already-published items — backfills a fact field (e.g. GPS) added after they were first published, no reset/re-index needed. |
 | `publish nas --mime-only --commit` | Only items with `mime` already set — for a library only partially re-indexed since mime detection was added (see below), so `--max-items` targets what's actually been re-indexed instead of the oldest-indexed items with none. |
+| `cold-archive nas` | Preview which catalog items aren't yet pushed to cold storage. |
+| `cold-archive nas --max-items 20 --commit` | Push a small batch first — see [Cold storage](#cold-storage) below. |
+| `cold-archive nas --commit` | Push everything not yet archived. Re-running only pushes what's new since last time — safe to run weekly. |
 | `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
 | `reset --all --commit` | Same, for every source. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
@@ -292,6 +295,42 @@ by `quick_hash` with no full-content check, so a false-positive fingerprint
 collision (see above) inflates both figures and will keep showing up there
 indefinitely — it's cosmetic, not a sign of unfinished work. Run `dedup
 <source>` itself for the real, confirmed picture.
+
+### Cold storage
+
+Backs up NAS originals to a separate GCS bucket (Archive storage class —
+priced for data you rarely touch, not for browsing). **Leaves the NAS file
+in place** — this only adds an off-site copy, it doesn't free NAS space.
+Needs `GCS_LIVE=1` and `COLD_STORAGE_BUCKET` set to a bucket distinct from
+`GCS_BUCKET` (thumbnails/previews live under a different lifecycle policy —
+previews expire daily, archived originals are meant to stay for a year+).
+Without `GCS_LIVE=1`, it writes to a local folder instead
+(`--coldstore-dir`, or `COLDSTORE_CACHE`), same live-switch every other
+cloud-facing command uses.
+
+Objects are keyed by NAS-relative path (`archive/<path>`), not content
+hash — unlike thumbnails, a backup you might browse in the GCS Console a
+year from now should read like the folder it came from.
+
+**Meant to run incrementally** (e.g. weekly), not as a one-time job: a
+`cold_archived_at` column in the local catalog tracks what's already been
+pushed, so re-running only picks up what's new since last time:
+```powershell
+docker exec media-vault-container python -m mediavault.cli cold-archive nas
+docker exec media-vault-container python -m mediavault.cli cold-archive nas --commit
+```
+
+**Try it on a small batch first** with `--max-items` before pushing an
+entire library over a home connection:
+```powershell
+docker exec media-vault-container python -m mediavault.cli cold-archive nas --max-items 20 --commit
+```
+
+Cold storage retrieval isn't free — Archive class charges a per-GB fee to
+read data back out, on top of normal network egress, and has a 365-day
+minimum retention (deleting or moving a file out early is billed as if it
+had stayed). This is for data you're confident you won't need again soon,
+not overflow you'll dip into.
 
 ### Amazon
 

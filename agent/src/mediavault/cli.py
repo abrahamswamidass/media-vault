@@ -7,6 +7,8 @@ Media Vault agent CLI.
     mediavault dedup nas --commit              archive them
     mediavault publish nas                     preview what needs a thumbnail
     mediavault publish nas --commit            push thumbnails + metadata
+    mediavault cold-archive nas                preview what's not yet in cold storage
+    mediavault cold-archive nas --commit --max-items 20   push a small batch first
     mediavault stats                           what the catalog knows
     mediavault reset nas --commit              wipe local catalog data for a source (testing)
 
@@ -33,6 +35,7 @@ from typing import Optional
 
 from .catalog import Catalog, dedup as dedup_mod, scanner
 from .actions.amazon import StageForAmazonAction
+from .actions.coldstorage import ColdArchiveAction
 from .actions.dedup import ArchiveDuplicatesAction
 from .actions.log import ActionLog
 from .actions.maintenance import PublishAction
@@ -88,6 +91,22 @@ def _facts_for(args):
         return FirestoreFactsStore()
     from .sync.facts import LocalFactsStore
     return LocalFactsStore(getattr(args, "facts_dir", None) or os.getenv("FACTS_CACHE", "/data/catalog/facts"))
+
+
+def _coldstore_for(args):
+    """A separate GCS bucket from GCS_BUCKET (thumbnails/previews) — cold
+    storage holds full originals under a different lifecycle/pricing
+    policy (Archive class, no expiry rule), so it can't share the same
+    bucket the preview-expiry lifecycle rule already governs."""
+    if os.getenv("GCS_LIVE", "0") == "1":
+        from .blobstore import GCSBlobStore
+        bucket = os.getenv("COLD_STORAGE_BUCKET", "")
+        if not bucket:
+            raise SystemExit("COLD_STORAGE_BUCKET is not set (GCS_LIVE=1 requires it).")
+        return GCSBlobStore(bucket=bucket)
+    from .blobstore import LocalBlobStore
+    return LocalBlobStore(getattr(args, "coldstore_dir", None)
+                          or os.getenv("COLDSTORE_CACHE", "/data/catalog/coldstore"))
 
 
 def _intents_for(args):
@@ -370,6 +389,59 @@ def cmd_publish(args) -> int:
         elif not args.commit and result.status == "ok":
             _banner(False)
         return 0 if result.status != "failed" else 1
+
+
+# --------------------------------------------------------------------------- #
+# cold-archive
+# --------------------------------------------------------------------------- #
+def cmd_cold_archive(args) -> int:
+    connector = _connector_for(args.source, args)
+    coldstore = _coldstore_for(args)
+
+    with _catalog(args) as catalog:
+        if catalog.count(args.source) == 0:
+            print(f"Nothing indexed for '{args.source}'. Run: mediavault index {args.source}")
+            return 1
+
+        rows = catalog.not_cold_archived(args.source, limit=args.max_items)
+        if not rows:
+            print(f"Nothing new to push for '{args.source}' — everything indexed is "
+                  f"already in cold storage ({catalog.cold_archived_count(args.source)} total).")
+            return 0
+
+        total_bytes = sum(r["size"] or 0 for r in rows)
+        capped = " (--max-items cap)" if args.max_items else ""
+        print(f"{len(rows)} file(s) not yet in cold storage, {_human(total_bytes)}{capped}.\n")
+
+        log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+        pushed = failed = noop = 0
+        pushed_bytes = 0
+
+        for row in rows:
+            result = log.record(
+                ColdArchiveAction(row["item_id"], connector, coldstore, catalog)
+                .run(commit=args.commit))
+            if result.status == "failed":
+                failed += 1
+                print(f"  ! {row['item_id']}: {result.detail}")
+            elif result.status == "no-op":
+                noop += 1
+            elif args.commit:
+                pushed += 1
+                pushed_bytes += row["size"] or 0
+                print(f"  + {row['item_id']} ({_human(row['size'] or 0)})")
+
+        _banner(args.commit)
+        if args.commit:
+            print(f"Pushed {pushed} file(s), {_human(pushed_bytes)}, to cold storage "
+                  f"({coldstore.name}). NAS originals left in place.")
+            if noop:
+                print(f"{noop} already there (caught up by a prior run).")
+            if failed:
+                print(f"{failed} failed — see the journal.")
+        else:
+            print(f"Would push {len(rows)} file(s), {_human(total_bytes)}.")
+        return 0 if not failed else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -831,6 +903,27 @@ def build_parser() -> argparse.ArgumentParser:
                           "distance and match/no-match outcome — for seeing why "
                           "clustering did or didn't group two photos together.")
     pub.set_defaults(_fn=cmd_publish, permanent=False)
+
+    # -- cold-archive --
+    ca = sub.add_parser(
+        "cold-archive",
+        help="push every catalog item not yet in cold storage to a GCS Archive-class bucket",
+        description="Backs up originals to a separate cold-storage bucket (COLD_STORAGE_BUCKET), "
+                    "keyed by their NAS-relative path so the bucket stays browsable. NAS files "
+                    "are left in place — this only adds an off-site copy, it doesn't free space. "
+                    "Re-running only pushes what's new since the last run.")
+    ca.add_argument("source", choices=CONNECTORS)
+    ca.add_argument("--root", help="override the connector root")
+    ca.add_argument("--trash", help="override the NAS trash folder")
+    ca.add_argument("--db", help="catalog database path")
+    ca.add_argument("--log-dir", help="where to write the action journal")
+    ca.add_argument("--coldstore-dir", help="local cold-storage folder (ignored if GCS_LIVE=1)")
+    ca.add_argument("--max-items", type=int, default=None,
+                    help="push at most this many files — e.g. a small number "
+                         "to try the pipeline out before a full run")
+    ca.add_argument("--commit", action="store_true",
+                    help="ACTUALLY upload (default: preview only)")
+    ca.set_defaults(_fn=cmd_cold_archive, permanent=False)
 
     # -- stats --
     s = sub.add_parser("stats", help="what the catalog currently knows")

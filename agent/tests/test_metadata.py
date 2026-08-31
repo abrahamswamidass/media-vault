@@ -154,7 +154,7 @@ def test_date_skips_an_implausible_datetimeoriginal(fake_exiftool):
     resets to a manufacture-era or epoch default date. That shouldn't win
     over a plausible date from a different tag."""
     fake_exiftool["result"] = [{
-        "EXIF:DateTimeOriginal": "1970:01:01 00:00:00",
+        "EXIF:DateTimeOriginal": "1980:01:01 00:00:00",
         "EXIF:CreateDate": "2026:01:16 00:00:00",
     }]
 
@@ -164,7 +164,7 @@ def test_date_skips_an_implausible_datetimeoriginal(fake_exiftool):
 
 
 def test_date_is_none_when_every_source_is_implausible_or_absent(fake_exiftool):
-    fake_exiftool["result"] = [{"EXIF:DateTimeOriginal": "1970:01:01 00:00:00"}]
+    fake_exiftool["result"] = [{"EXIF:DateTimeOriginal": "1980:01:01 00:00:00"}]
 
     result = metadata.extract(b"fake", suffix=".jpg")
 

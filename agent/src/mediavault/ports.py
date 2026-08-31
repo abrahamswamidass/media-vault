@@ -71,6 +71,17 @@ class BlobStore(ABC):
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
         """Store bytes under key. Returns the key. Overwrites if present."""
 
+    def put_stream(self, key: str, chunks: Iterable[bytes],
+                    content_type: str = "application/octet-stream") -> str:
+        """Store bytes from a chunk iterator instead of put()'s single bytes
+        object. Default falls back to buffering into memory via put() —
+        fine for the small derived blobs this port was built for
+        (thumbnails, previews), but a multi-gigabyte original (see cold
+        storage's use of this port) would OOM-kill the process the same way
+        Connector.read() would; see read_chunks() below for the same trade.
+        An adapter that expects large originals should override this."""
+        return self.put(key, b"".join(chunks), content_type=content_type)
+
     @abstractmethod
     def url(self, key: str) -> str:
         """A reference the web module can resolve. Not necessarily public."""

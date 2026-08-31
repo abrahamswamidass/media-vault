@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS items (
     metering_mode TEXT,
     flash       TEXT,
     phash       TEXT,
+    cold_archived_at TEXT,
     PRIMARY KEY (source, item_id)
 );
 
@@ -156,6 +157,7 @@ class Catalog:
             "ALTER TABLE items ADD COLUMN metering_mode TEXT",
             "ALTER TABLE items ADD COLUMN flash TEXT",
             "ALTER TABLE items ADD COLUMN phash TEXT",
+            "ALTER TABLE items ADD COLUMN cold_archived_at TEXT",
         ):
             try:
                 self.conn.execute(ddl)
@@ -325,6 +327,15 @@ class Catalog:
              exif.get("flash"), source, item_id),
         )
 
+    def mark_cold_archived(self, source: str, item_id: str) -> None:
+        """Flag an item as pushed to cold storage. Re-run-proof: a later
+        cold-archive pass only looks at rows still missing this, so a
+        weekly incremental run only ever touches what's new since last time."""
+        self.conn.execute(
+            "UPDATE items SET cold_archived_at = ? WHERE source = ? AND item_id = ?",
+            (_now(), source, item_id),
+        )
+
     def set_phash(self, source: str, item_id: str, phash: str) -> None:
         """Record a perceptual hash pulled from the full decoded image (see
         imaging.py's phash()). Computed once and persisted — unlike EXIF's
@@ -387,6 +398,25 @@ class Catalog:
         return self.conn.execute(
             "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "
             "AND published_at IS NOT NULL", (source,)).fetchone()[0]
+
+    def cold_archived_count(self, source: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "
+            "AND cold_archived_at IS NOT NULL", (source,)).fetchone()[0]
+
+    def not_cold_archived(self, source: str, limit: Optional[int] = None) -> list[sqlite3.Row]:
+        """Active items not yet pushed to cold storage, oldest-indexed first —
+        same "who's left" shape as unpublished(), so a weekly run only ever
+        sees what's new since the last one. No hash/mime requirement: unlike
+        a thumbnail, cold storage isn't gated on anything but the file
+        existing in the catalog at all."""
+        sql = ("SELECT * FROM items WHERE source = ? AND state = 'active' "
+               "AND cold_archived_at IS NULL ORDER BY indexed_at, item_id")
+        params: tuple = (source,)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (source, limit)
+        return self.conn.execute(sql, params).fetchall()
 
     def sources(self) -> list[str]:
         return [r[0] for r in self.conn.execute(

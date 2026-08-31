@@ -45,9 +45,25 @@ def catalog(tmp_path):
         yield c
 
 
+def _normalize_item_ids(catalog, source):
+    """NASConnector (the mount-based connector) stringifies item_id via
+    Path.relative_to(), which uses the OS-native separator -- "/" on Linux
+    (always true in the real container, and always true for the SMB
+    connector production actually uses), backslashes if this suite runs
+    directly on a Windows host. dedup's own path-depth logic legitimately
+    assumes "/" the same way every other consumer does; normalizing here
+    makes these tests exercise it against the id format it actually sees in
+    every real deployment, not a Windows-host-only artifact."""
+    catalog.conn.execute(
+        "UPDATE items SET item_id = REPLACE(item_id, '\\', '/') WHERE source = ?",
+        (source,))
+    catalog.conn.commit()
+
+
 def _indexed(root, catalog, source="nas"):
     conn = NASConnector(str(root))
     scan(conn, catalog, source=source)
+    _normalize_item_ids(catalog, source)
     return conn
 
 
@@ -98,6 +114,7 @@ def test_operational_folders_are_never_indexed(nas, catalog):
 
     conn = NASConnector(str(nas), exclude=[str(nas / "_AmazonUpload")])
     scan(conn, catalog, source="nas")
+    _normalize_item_ids(catalog, "nas")
 
     ids = {row["item_id"] for row in catalog.conn.execute(
         "SELECT item_id FROM items WHERE source = 'nas'")}

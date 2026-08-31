@@ -9,10 +9,11 @@ from __future__ import annotations
 import pytest
 
 from mediavault.actions import (
-    ActionLog, ArchiveItemAction, CopyAction, DeleteAction, MoveAction, RestoreAction,
-    STATUS_FAILED, STATUS_NOOP, STATUS_OK,
+    ActionLog, ArchiveItemAction, ColdArchiveAction, CopyAction, DeleteAction,
+    MoveAction, RestoreAction, STATUS_FAILED, STATUS_NOOP, STATUS_OK,
 )
 from mediavault.actions.base import Action
+from mediavault.actions.coldstorage import cold_key
 from mediavault.actions.derive import FetchFullResAction, ThumbnailAction
 from mediavault.connectors.nas import NASConnector
 from mediavault.blobstore import LocalBlobStore, blob_key
@@ -326,6 +327,74 @@ def test_thumbnail_action_skips_frame_extraction_for_photos(nas, blobs, monkeypa
 
 
 # --------------------------------------------------------------------------- #
+# Cold storage — off-site backup of originals, NAS left untouched
+# --------------------------------------------------------------------------- #
+def test_cold_archive_uploads_and_keys_by_path_not_hash(nas, blobs):
+    """Unlike thumbnails, cold storage is keyed by the NAS-relative path so
+    the bucket stays browsable — a deliberate contrast with blob_key()."""
+    result = ColdArchiveAction("Photos/img_001.jpg", nas, blobs).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["key"] == cold_key("Photos/img_001.jpg")
+    assert blobs.exists(cold_key("Photos/img_001.jpg"))
+
+
+def test_cold_archive_dry_run_uploads_nothing(nas, blobs):
+    result = ColdArchiveAction("Photos/img_001.jpg", nas, blobs).run()   # no commit=
+
+    assert result.committed is False
+    assert not blobs.exists(cold_key("Photos/img_001.jpg"))
+
+
+def test_cold_archive_replay_is_a_noop(nas, blobs):
+    """At-least-once delivery of a weekly run means re-running over the same
+    file is expected — must not re-read/re-upload what's already there."""
+    first = ColdArchiveAction("Photos/img_001.jpg", nas, blobs).run(commit=True)
+    second = ColdArchiveAction("Photos/img_001.jpg", nas, blobs).run(commit=True)
+
+    assert first.status == STATUS_OK and first.committed is True
+    assert second.status == STATUS_NOOP
+    assert second.committed is False
+
+
+def test_cold_archive_missing_file_fails_validation(nas, blobs):
+    result = ColdArchiveAction("Photos/does_not_exist.jpg", nas, blobs).run(commit=True)
+
+    assert result.status == STATUS_FAILED
+    assert not blobs.exists(cold_key("Photos/does_not_exist.jpg"))
+
+
+def test_cold_archive_leaves_the_nas_original_in_place(nas, blobs):
+    """This is a backup, not a move — MoveAction is the shape for offloading
+    NAS space; cold-archive never touches the source file."""
+    ColdArchiveAction("Photos/img_001.jpg", nas, blobs).run(commit=True)
+
+    assert (nas.root / "Photos" / "img_001.jpg").exists()
+
+
+def test_cold_archive_marks_the_catalog_row(nas, blobs, catalog):
+    _insert_active_item(catalog, "nas", "Photos/img_001.jpg")
+
+    ColdArchiveAction("Photos/img_001.jpg", nas, blobs, catalog=catalog).run(commit=True)
+
+    row = catalog.get("nas", "Photos/img_001.jpg")
+    assert row["cold_archived_at"] is not None
+
+
+def test_cold_archive_self_heals_catalog_when_bucket_already_has_it(nas, blobs, catalog):
+    """A crash between the upload and the catalog commit (plausible mid a
+    multi-thousand-file batch) leaves the bucket ahead of the catalog. The
+    next run must still catch the catalog up, not silently skip it forever."""
+    _insert_active_item(catalog, "nas", "Photos/img_001.jpg")
+    blobs.put(cold_key("Photos/img_001.jpg"), b"already-there")
+
+    result = ColdArchiveAction("Photos/img_001.jpg", nas, blobs, catalog=catalog).run(commit=True)
+
+    assert result.status == STATUS_NOOP
+    assert catalog.get("nas", "Photos/img_001.jpg")["cold_archived_at"] is not None
+
+
+# --------------------------------------------------------------------------- #
 # The journal
 # --------------------------------------------------------------------------- #
 def test_log_records_enough_to_replay(nas, tmp_path):
@@ -335,7 +404,10 @@ def test_log_records_enough_to_replay(nas, tmp_path):
     entry = log.last_for("Photos/junk.jpg")
     assert entry.action_type == "delete"
     assert entry.inputs == {"connector": "nas", "item_id": "Photos/junk.jpg"}
-    assert entry.outputs["dest"].endswith("_trash/Photos/junk.jpg")
+    # dest is a real filesystem path for an actual OS move, so it's
+    # legitimately OS-native (backslashes on Windows) -- normalize before
+    # comparing, rather than forcing the connector to produce "/" here.
+    assert entry.outputs["dest"].replace("\\", "/").endswith("_trash/Photos/junk.jpg")
 
 
 def test_log_survives_a_torn_final_line(nas, tmp_path):

@@ -5,6 +5,7 @@ from .derive import FetchFullResAction, ThumbnailAction
 from .dedup import ArchiveDuplicatesAction
 from .maintenance import DedupSourceAction, IndexAction, PublishAction
 from .amazon import StageForAmazonAction
+from .coldstorage import ColdArchiveAction
 from .log import ActionLog
 
 __all__ = [
@@ -13,6 +14,6 @@ __all__ = [
     "ArchiveItemAction", "CopyAction", "DeleteAction", "MoveAction", "RestoreAction",
     "FetchFullResAction", "ThumbnailAction",
     "ArchiveDuplicatesAction", "DedupSourceAction", "IndexAction", "PublishAction",
-    "StageForAmazonAction",
+    "StageForAmazonAction", "ColdArchiveAction",
     "ActionLog",
 ]

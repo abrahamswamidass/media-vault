@@ -115,5 +115,18 @@ class GCSBlobStore(BlobStore):
         blob.upload_from_string(data, content_type=content_type)
         return key
 
+    def put_stream(self, key: str, chunks, content_type: str = "application/octet-stream") -> str:
+        """Overrides the base class's buffer-then-put() default — writes
+        each chunk straight to the wire via a resumable upload session
+        instead of holding a whole file (cold storage's originals include
+        multi-gigabyte video, unlike this store's usual thumbnails) in
+        memory first."""
+        bucket = self._require_live()
+        blob = bucket.blob(key)
+        with blob.open("wb", content_type=content_type) as f:
+            for chunk in chunks:
+                f.write(chunk)
+        return key
+
     def url(self, key: str) -> str:
         return f"gs://{self.bucket_name}/{key}"
