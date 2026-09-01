@@ -2,8 +2,10 @@
 
 Personal media system, single user. A **local agent** indexes ~1 TB across NAS,
 Google Drive, and exported archives; a **web module** in Google Cloud is where
-decisions get made. The NAS is the source of truth and nothing else ever writes
-to it.
+the library gets both **viewed and managed** — browsing, staging for Amazon,
+archiving, undoing — by writing intents for the agent to act on, never by
+touching a file itself. The NAS is the source of truth and nothing else ever
+writes to it.
 
 ## The three rules
 
@@ -125,8 +127,13 @@ is a circular import — that already happened once.
 
 ## Deduplication rules — do not relax these
 
-The NAS holds everything; Drive holds a curated copy of the good things; Amazon is
-push-only for TV playback. Therefore:
+The NAS holds everything and is the primary source. Cold storage
+(`cold-archive`, a separate GCS Archive bucket) holds a full off-site
+safety backup of NAS originals. Amazon is push-only for TV/home-device
+display. Drive (and Google Photos) still work the same way — same
+commands, same dedup/restore rules — but their *intended scope* has
+shrunk: a small, deliberately-chosen set of content, not a broad curated
+mirror of the library. Therefore:
 
 - **Duplicates are compared within a single source, never across.** A photo in both
   the NAS and Drive is correct. `Catalog.duplicate_groups` is scoped to one source

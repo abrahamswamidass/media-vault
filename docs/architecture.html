@@ -572,11 +572,13 @@ footer {
     <div class="eyebrow">Deduplication</div>
     <h2>Within a source, never across it</h2>
     <p>
-      The NAS holds everything. Drive holds a curated copy of the good things.
-      Amazon receives the occasional push so something shows up on a TV. So a photo
-      existing in both the NAS and Drive is <em>the system working</em> &mdash; and
-      the grouping query is scoped to one source precisely so that pair is
-      unreachable by any code path here.
+      The NAS holds everything and is the primary source. Cold storage holds a
+      full off-site backup of it. Drive holds only a small, deliberately-chosen
+      subset &mdash; not a mirror of the library. Amazon receives the occasional
+      push so something shows up on a TV. So a photo existing in both the NAS
+      and Drive is <em>the system working</em> &mdash; and the grouping query is
+      scoped to one source precisely so that pair is unreachable by any code
+      path here.
     </p>
 
     <div class="cards">

@@ -233,8 +233,9 @@ docker exec media-vault-container python -m mediavault.cli publish nas --mime-on
 ### Deduplication
 
 Duplicates are found **within one source only**. The same photo on the NAS and
-in Drive is this system working as designed — Drive is your curated cloud
-copy — so that pair is never touched.
+in Drive is this system working as designed — Drive holds only a small,
+deliberately-chosen subset of the library, not a mirror of it — so that
+pair is never touched.
 
 Every group keeps exactly one copy: the **oldest**, tie-broken by the
 shallowest path. Files over 128 KB are fully hashed before anything is
