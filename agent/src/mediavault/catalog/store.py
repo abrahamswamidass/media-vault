@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS scans (
 -- would not.
 CREATE TABLE IF NOT EXISTS schedules (
     name        TEXT PRIMARY KEY,
-    last_run_at TEXT NOT NULL
+    last_run_at TEXT NOT NULL,
+    detail      TEXT
 );
 
 -- A person is a cluster of faces believed to be the same individual.
@@ -168,6 +169,7 @@ class Catalog:
             "ALTER TABLE items ADD COLUMN flash TEXT",
             "ALTER TABLE items ADD COLUMN phash TEXT",
             "ALTER TABLE items ADD COLUMN cold_archived_at TEXT",
+            "ALTER TABLE schedules ADD COLUMN detail TEXT",
         ):
             try:
                 self.conn.execute(ddl)
@@ -344,11 +346,21 @@ class Catalog:
             "SELECT last_run_at FROM schedules WHERE name = ?", (name,)).fetchone()
         return row["last_run_at"] if row else None
 
-    def mark_scheduled_run(self, name: str) -> None:
+    def get_schedule_status(self, name: str) -> Optional[dict]:
+        """{"last_run_at", "detail"} for a named periodic task, or None if
+        it's never run. Used to report status up to the web UI's header
+        indicator (see cli.py's watch loop) -- `detail` is a short
+        human-readable summary of what that last run actually did."""
+        row = self.conn.execute(
+            "SELECT last_run_at, detail FROM schedules WHERE name = ?", (name,)).fetchone()
+        return {"last_run_at": row["last_run_at"], "detail": row["detail"] or ""} if row else None
+
+    def mark_scheduled_run(self, name: str, detail: str = "") -> None:
         self.conn.execute(
-            "INSERT INTO schedules (name, last_run_at) VALUES (?, ?) "
-            "ON CONFLICT(name) DO UPDATE SET last_run_at = excluded.last_run_at",
-            (name, _now()))
+            "INSERT INTO schedules (name, last_run_at, detail) VALUES (?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET last_run_at = excluded.last_run_at, "
+            "detail = excluded.detail",
+            (name, _now(), detail))
         self.conn.commit()
 
     def mark_cold_archived(self, source: str, item_id: str) -> None:

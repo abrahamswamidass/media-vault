@@ -682,9 +682,16 @@ nav a.active {
 .agent-heartbeat {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.9rem;
   font-size: 0.8rem;
   color: #999;
+}
+
+.agent-heartbeat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: default;
 }
 
 .agent-heartbeat-dot {
@@ -696,6 +703,7 @@ nav a.active {
 
 .agent-heartbeat-dot.is-live { background: #6dbf6d; }
 .agent-heartbeat-dot.is-stale { background: #d97070; }
+.agent-heartbeat-dot.is-off { background: #555; }
 
 .amazon-row-when {
   font-size: 0.7rem;

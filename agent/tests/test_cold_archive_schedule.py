@@ -20,6 +20,7 @@ from mediavault.catalog import scanner
 from mediavault.cli import (
     _maybe_run_scheduled_cold_archive,
     _maybe_run_scheduled_index,
+    _schedule_status_for_heartbeat,
 )
 from mediavault.connectors.nas import NASConnector
 
@@ -186,13 +187,74 @@ def test_index_resumes_an_interrupted_scan_instead_of_restarting(args, catalog, 
     assert state["complete"] == 1
 
 
+def test_index_records_a_human_readable_detail(args, catalog, monkeypatch):
+    monkeypatch.setenv("INDEX_SCHEDULE", "1")
+
+    _maybe_run_scheduled_index(args, catalog)
+
+    status = catalog.get_schedule_status("index_nas")
+    assert "1 file" in status["detail"]
+
+
+def test_cold_archive_records_a_human_readable_detail(args, catalog, monkeypatch):
+    monkeypatch.setenv("COLD_ARCHIVE_SCHEDULE", "1")
+    monkeypatch.delenv("GCS_LIVE", raising=False)
+    scanner.scan(NASConnector(args.root), catalog, source="nas")
+
+    _maybe_run_scheduled_cold_archive(args, catalog)
+
+    status = catalog.get_schedule_status("cold_archive_nas")
+    assert "pushed 1 file" in status["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# heartbeat status snapshot
+# --------------------------------------------------------------------------- #
+def test_heartbeat_status_reports_disabled_schedules(args, catalog, monkeypatch):
+    monkeypatch.delenv("INDEX_SCHEDULE", raising=False)
+    monkeypatch.delenv("COLD_ARCHIVE_SCHEDULE", raising=False)
+
+    status = _schedule_status_for_heartbeat(catalog)
+
+    assert status["index_nas"]["enabled"] is False
+    assert status["index_nas"]["last_run_at"] is None
+    assert status["cold_archive_nas"]["enabled"] is False
+
+
+def test_heartbeat_status_reflects_a_completed_run(args, catalog, monkeypatch):
+    monkeypatch.setenv("INDEX_SCHEDULE", "1")
+    monkeypatch.setenv("INDEX_INTERVAL_DAYS", "3")
+    _maybe_run_scheduled_index(args, catalog)
+
+    status = _schedule_status_for_heartbeat(catalog)
+
+    entry = status["index_nas"]
+    assert entry["enabled"] is True
+    assert entry["interval_days"] == 3
+    assert entry["last_run_at"] is not None
+    assert "1 file" in entry["detail"]
+
+
+def test_heartbeat_status_key_follows_a_non_default_source(args, catalog, monkeypatch):
+    monkeypatch.setenv("COLD_ARCHIVE_SCHEDULE", "1")
+    monkeypatch.setenv("COLD_ARCHIVE_SOURCE", "drive")
+
+    status = _schedule_status_for_heartbeat(catalog)
+
+    assert "cold_archive_drive" in status
+    assert "cold_archive_nas" not in status
+
+
 # --------------------------------------------------------------------------- #
 # shared plumbing
 # --------------------------------------------------------------------------- #
 def test_catalog_schedule_round_trip(catalog):
     assert catalog.get_last_scheduled_run("x") is None
-    catalog.mark_scheduled_run("x")
+    assert catalog.get_schedule_status("x") is None
+    catalog.mark_scheduled_run("x", detail="did a thing")
     first = catalog.get_last_scheduled_run("x")
     assert first is not None
-    catalog.mark_scheduled_run("x")
+    assert catalog.get_schedule_status("x") == {"last_run_at": first, "detail": "did a thing"}
+    catalog.mark_scheduled_run("x", detail="did another thing")
     assert catalog.get_last_scheduled_run("x") >= first
+    assert catalog.get_schedule_status("x")["detail"] == "did another thing"

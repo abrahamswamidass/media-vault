@@ -58,7 +58,13 @@ function popupContent(item) {
     .catch((err) => console.error(item.item_id, err));
   const name = document.createElement("div");
   name.className = "map-popup-name";
-  name.textContent = item.item_id;
+  // Just the filename, not the full NAS path -- item.item_id is a folder
+  // structure like "percial/Photos/MobileBackup/iPhone/2025/10/img.jpg",
+  // meaningless as a caption. photoModal.js already makes this same Name
+  // vs. Path distinction (item.name is the plain filename the catalog
+  // already carries); this popup is a lightweight preview, so it only
+  // needs the short one.
+  name.textContent = item.name || item.item_id;
 
   const stageBtn = document.createElement("button");
   stageBtn.type = "button";

@@ -713,15 +713,15 @@ def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
         coldstore = _coldstore_for(args)
         rows = catalog.not_cold_archived(source)
         summary = _run_cold_archive(rows, connector, coldstore, catalog, commit=True)
-        print(f"  cold-archive: pushed {summary['pushed']} file(s), "
-              f"{_human(summary['pushed_bytes'])} "
-              f"({summary['noop']} already there, {summary['failed']} failed)")
+        detail = (f"pushed {summary['pushed']} file(s), {_human(summary['pushed_bytes'])} "
+                  f"({summary['noop']} already there, {summary['failed']} failed)")
+        print(f"  cold-archive: {detail}")
         # Marked only on a completed pass, not from inside the try above on
         # a construction failure -- a real misconfiguration should keep
         # surfacing every cycle rather than going silent for a week, the
         # same tolerance process-intents itself already has for retrying a
         # failed poll on the very next cycle.
-        catalog.mark_scheduled_run(schedule_name)
+        catalog.mark_scheduled_run(schedule_name, detail=detail)
     except Exception as e:
         print(f"  cold-archive schedule failed: {e}")
 
@@ -749,15 +749,36 @@ def _maybe_run_scheduled_index(args, catalog) -> None:
     try:
         connector = _connector_for(source, args)
         report = scanner.scan(connector, catalog, source=source, resume=True)
-        print(f"  index: {report.files_indexed:,} file(s) across "
-              f"{report.directories:,} director(y/ies), {report.errors} error(s)")
+        detail = (f"{report.files_indexed:,} file(s) across "
+                  f"{report.directories:,} director(y/ies), {report.errors} error(s)")
+        print(f"  index: {detail}")
         # Same reasoning as cold-archive above: only marked on a completed
         # pass, so a connector-construction failure (bad SMB creds, NAS
         # unreachable) keeps surfacing every cycle instead of going silent
         # for a week.
-        catalog.mark_scheduled_run(schedule_name)
+        catalog.mark_scheduled_run(schedule_name, detail=detail)
     except Exception as e:
         print(f"  index schedule failed: {e}")
+
+
+def _schedule_status_for_heartbeat(catalog) -> dict:
+    """Snapshot of both periodic schedules' configuration + last-run state,
+    for the web header's status indicator. Reports whether each is even
+    enabled (a schedule the user never opted into shouldn't read as
+    "broken"), not just its last-run timestamp -- the UI needs both to
+    tell "off" apart from "overdue"."""
+    out = {}
+    for prefix, enabled_var, source_var, interval_var in (
+        ("index", "INDEX_SCHEDULE", "INDEX_SOURCE", "INDEX_INTERVAL_DAYS"),
+        ("cold_archive", "COLD_ARCHIVE_SCHEDULE", "COLD_ARCHIVE_SOURCE", "COLD_ARCHIVE_INTERVAL_DAYS"),
+    ):
+        enabled = os.getenv(enabled_var, "0") == "1"
+        source = os.getenv(source_var, "nas")
+        interval_days = int(os.getenv(interval_var, "7"))
+        name = f"{prefix}_{source}"
+        status = catalog.get_schedule_status(name) or {"last_run_at": None, "detail": ""}
+        out[name] = {"enabled": enabled, "interval_days": interval_days, **status}
+    return out
 
 
 def _stop_on_sigterm(signum, frame):
@@ -805,9 +826,16 @@ def cmd_process_intents(args) -> int:
                 _process_intents_once(args, intents_store, catalog)
                 # Best-effort: a status-doc write failing (e.g. a transient
                 # Firestore hiccup) shouldn't kill an otherwise-healthy loop.
+                # Written before the scheduled checks below, deliberately --
+                # those can run for hours (a full index or cold-archive
+                # pass), and this heartbeat is what tells the web header
+                # "the loop is alive" independent of how long any one
+                # cycle's work takes. Its `schedules` snapshot reflects
+                # whatever was true as of the end of the *previous* cycle;
+                # a run that starts this cycle shows up here next time.
                 try:
                     still_pending = len(intents_store.peek_pending(limit=1000))
-                    intents_store.heartbeat(still_pending)
+                    intents_store.heartbeat(still_pending, schedules=_schedule_status_for_heartbeat(catalog))
                 except Exception as e:
                     print(f"  (heartbeat failed: {e})")
                 _maybe_run_scheduled_index(args, catalog)

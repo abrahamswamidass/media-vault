@@ -124,14 +124,26 @@ The **Amazon** tab is read-only — it lists what's been requested and its
 current status (waiting / working / staged / failed), not a picker of its
 own.
 
-**A green/red dot in the page header** shows whether the watch loop is
-actually running right now — useful because the container's default command
-*can* be overridden (see setup.md), or the container could simply be
-stopped. `--watch` writes a heartbeat (`agent_status/process_intents`:
-last-poll time + pending count) each time it polls; the dot goes red if that
-heartbeat is more than 20 minutes old or missing entirely — meaning any
-request, of any type, would just sit pending until the container (or a
-manual `process-intents --commit`) picks it up.
+**Three dots in the page header** — intents, index, cold-archive — each a
+quick green/red/gray LED, with the actual detail (last-run time, what it
+did) in a hover tooltip rather than cluttering the header itself.
+
+- **Intents** shows whether the watch loop is actually running right now —
+  useful because the container's default command *can* be overridden (see
+  setup.md), or the container could simply be stopped. `--watch` writes a
+  heartbeat (`agent_status/process_intents`: last-poll time + pending count)
+  each time it polls; the dot goes red if that heartbeat is more than 20
+  minutes old or missing entirely — meaning any request, of any type, would
+  just sit pending until the container (or a manual `process-intents
+  --commit`) picks it up.
+- **Index** and **Cold-archive** reflect the optional weekly schedules (see
+  [agent.md's Scheduled maintenance](agent.md#scheduled-maintenance-index--cold-archive)):
+  gray if that schedule was never turned on (`INDEX_SCHEDULE`/
+  `COLD_ARCHIVE_SCHEDULE`), green if its last run was within 1.5× its
+  configured interval, red if it's overdue. Hovering either shows exactly
+  when it last ran and a one-line summary of what happened (files
+  indexed, files pushed, errors) — the same detail the container's own
+  logs would show, without needing to go find them.
 
 **If you ever do need to run it by hand** — the container was started with
 `sleep infinity` instead, or you're troubleshooting — use `docker exec -it`,

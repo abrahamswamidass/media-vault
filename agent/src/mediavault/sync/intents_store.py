@@ -164,11 +164,14 @@ class FirestoreIntentsStore(IntentsStore):
         client.collection(self.collection).document(intent_id).update(
             {"status": FAILED, "result": result})
 
-    def heartbeat(self, pending_count: int) -> None:
+    def heartbeat(self, pending_count: int, schedules: dict | None = None) -> None:
         # Fixed document id, not a growing collection: the web UI only ever
         # needs the latest heartbeat, never a history of them.
         client = self._require_live()
-        client.collection("agent_status").document("process_intents").set({
+        doc = {
             "last_poll_at": _now_iso(),
             "pending_count": pending_count,
-        })
+        }
+        if schedules is not None:
+            doc["schedules"] = schedules
+        client.collection("agent_status").document("process_intents").set(doc)

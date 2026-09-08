@@ -157,8 +157,12 @@ class IntentsStore(ABC):
     def fail(self, intent_id: str, result: dict) -> None:
         """Mark one intent 'failed', with its ActionResult (or error dict)."""
 
-    def heartbeat(self, pending_count: int) -> None:
-        """Record that a `process-intents --watch` loop is alive right now.
+    def heartbeat(self, pending_count: int, schedules: Optional[dict] = None) -> None:
+        """Record that a `process-intents --watch` loop is alive right now,
+        plus (optionally) a snapshot of periodic background schedules --
+        index/cold-archive's enabled state, interval, and last-run status
+        (see cli.py's _schedule_status_for_heartbeat) -- for the web
+        header's status indicator.
 
         Concrete method, not abstract, with a no-op default: this is a nice-
         to-have status signal for the web UI (see PublishAction/facts.py for
