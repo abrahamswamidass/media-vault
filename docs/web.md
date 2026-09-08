@@ -124,9 +124,12 @@ The **Amazon** tab is read-only — it lists what's been requested and its
 current status (waiting / working / staged / failed), not a picker of its
 own.
 
-**Three dots in the page header** — intents, index, cold-archive — each a
-quick green/red/gray LED, with the actual detail (last-run time, what it
-did) in a hover tooltip rather than cluttering the header itself.
+**Three bare dots in the page header** — intents, index, cold-archive — each
+a quick green/red/gray LED with no visible text of its own. The actual
+detail (last-run time, what happened) only shows on hover on desktop (the
+native browser tooltip) or tap on touch devices (a small bubble under the
+dot, since `title` has no real tap equivalent on a phone) — deliberately
+kept out of the header itself.
 
 - **Intents** shows whether the watch loop is actually running right now —
   useful because the container's default command *can* be overridden (see
@@ -140,7 +143,7 @@ did) in a hover tooltip rather than cluttering the header itself.
   [agent.md's Scheduled maintenance](agent.md#scheduled-maintenance-index--cold-archive)):
   gray if that schedule was never turned on (`INDEX_SCHEDULE`/
   `COLD_ARCHIVE_SCHEDULE`), green if its last run was within 1.5× its
-  configured interval, red if it's overdue. Hovering either shows exactly
+  configured interval, red if it's overdue. Hover or tap either for exactly
   when it last ran and a one-line summary of what happened (files
   indexed, files pushed, errors) — the same detail the container's own
   logs would show, without needing to go find them.

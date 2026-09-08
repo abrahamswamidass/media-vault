@@ -504,41 +504,22 @@ nav a.active {
   background: #1c1c1c;
 }
 
-.map-popup {
-  width: 160px;
-}
-
-.map-popup img {
-  display: block;
-  width: 100%;
-  border-radius: 4px;
-  margin-bottom: 0.35rem;
-  background: #222;
-}
-
-.map-popup-name {
-  font-size: 0.7rem;
-  color: #333;
-  word-break: break-all;
-  margin-bottom: 0.4rem;
-}
-
-.map-popup-stage {
-  display: block;
-  width: 100%;
+/* A marker standing in for more than one photo at (near enough) the same
+   spot — see map.js's clusterByLocation(). Plain single-photo pins use
+   Leaflet's own default icon, so this only ever needs to draw the badge. */
+.map-cluster-icon span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #2f6fd6;
+  color: #fff;
   font-size: 0.75rem;
-  padding: 0.3rem 0.5rem;
-}
-
-.map-popup-stage:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.map-popup-status {
-  margin-top: 0.3rem;
-  font-size: 0.65rem;
-  color: #555;
+  font-weight: 600;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .card .meta {
@@ -682,28 +663,41 @@ nav a.active {
 .agent-heartbeat {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
-  font-size: 0.8rem;
-  color: #999;
-}
-
-.agent-heartbeat-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: default;
+  gap: 0.5rem;
+  position: relative; /* anchors the tap bubble's absolute positioning */
 }
 
 .agent-heartbeat-dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.6rem;
+  height: 0.6rem;
   border-radius: 50%;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .agent-heartbeat-dot.is-live { background: #6dbf6d; }
 .agent-heartbeat-dot.is-stale { background: #d97070; }
 .agent-heartbeat-dot.is-off { background: #555; }
+
+/* Tap-to-reveal detail for touch devices, where hover/`title` has no real
+   equivalent — see agentHeartbeat.js's toggleBubble(). Desktop gets the
+   same text for free via the native `title` tooltip on hover. */
+.agent-heartbeat-bubble {
+  position: absolute;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: #222;
+  color: #eee;
+  border: 1px solid #444;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  white-space: pre-line;
+  max-width: 16rem;
+  z-index: 20;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
 
 .amazon-row-when {
   font-size: 0.7rem;

@@ -276,9 +276,32 @@ class PublishAction(Action):
                 # items) would re-detect every face on every republished
                 # item, duplicating rows in `faces` and re-paying the
                 # compute cost for nothing new.
+                #
+                # bbox is normalized to a 0-1 fraction of the *full* image's
+                # own dimensions (from EXIF, read above) before it ever
+                # leaves this function -- the web only ever displays a
+                # differently-sized thumbnail, never the full original, so a
+                # raw pixel-coordinate box (what faces.detect_faces() and
+                # the local `faces` table both store) would be meaningless
+                # there. Only the box crosses to Firestore, never the
+                # embedding that actually makes a face identifiable -- see
+                # CLAUDE.md's face-detection design note.
+                img_w, img_h = exif.get("width"), exif.get("height")
+
+                def _norm_bbox(x1, y1, x2, y2):
+                    if not img_w or not img_h:
+                        return None
+                    return [round(x1 / img_w, 4), round(y1 / img_h, 4),
+                            round(x2 / img_w, 4), round(y2 / img_h, 4)]
+
                 existing = self.catalog.faces_for_item(self.source, item_id)
                 person_ids: list[str] = sorted({
                     str(f["person_id"]) for f in existing if f["person_id"] is not None})
+                face_entries = [
+                    {"person_id": str(f["person_id"]),
+                     "bbox": _norm_bbox(f["bbox_x1"], f["bbox_y1"], f["bbox_x2"], f["bbox_y2"])}
+                    for f in existing if f["person_id"] is not None
+                ]
                 need_faces = not existing and os.getenv("FACES_LIVE", "0") == "1" and is_image
 
                 full = None
@@ -312,8 +335,11 @@ class PublishAction(Action):
                                 self.source, item_id, face["bbox"], face["score"],
                                 face["embedding"], person_id)
                             person_ids.append(str(person_id))
+                            face_entries.append({"person_id": str(person_id),
+                                                 "bbox": _norm_bbox(*face["bbox"])})
                     except Exception:
                         person_ids = []
+                        face_entries = []
 
                 self.facts.put(self.source, item_id, {
                     "source": self.source, "item_id": item_id, "name": row["name"],
@@ -336,6 +362,7 @@ class PublishAction(Action):
                     "metering_mode": exif.get("metering_mode"),
                     "flash": exif.get("flash"),
                     "person_ids": person_ids,
+                    "faces": face_entries,
                     "phash": phash,
                 })
                 self.catalog.mark_published(self.source, item_id)

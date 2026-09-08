@@ -87,7 +87,24 @@
     },
     "person_ids": {
       "type": "array", "items": { "type": "string" },
-      "description": "Ids into the people collection, one per distinct face-cluster detected in this item (photos only). Opaque ids only -- no face embeddings or bounding boxes are ever published here; those stay in the agent's local catalog. Empty unless FACES_LIVE was on when this item was published."
+      "description": "Ids into the people collection, one per distinct face-cluster detected in this item (photos only). Opaque ids only -- face embeddings (the data that actually makes a face identifiable/matchable) never leave the agent's local catalog; see `faces` for the one thing that does cross, and why that's still safe to publish. Empty unless FACES_LIVE was on when this item was published."
+    },
+    "faces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "person_id": { "type": "string" },
+          "bbox": {
+            "type": ["array", "null"],
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4, "maxItems": 4,
+            "description": "[x1, y1, x2, y2], each a 0-1 fraction of the full original image's own width/height -- not pixel coordinates, and not relative to `thumb` specifically, since that's a differently-sized derivative. Lets the web crop a person's representative thumbnail to their actual face via CSS, without needing a new cropped image asset. null if the image's dimensions weren't known at publish time (rare -- EXIF missing them)."
+          }
+        }
+      },
+      "description": "One entry per face in `person_ids`, pairing each with just its location in the frame -- a bounding box alone reveals nothing about who someone is (that requires the embedding, which stays local), so this is a deliberate, narrow exception to 'no biometric data leaves the agent,' not a relaxation of it. See CLAUDE.md's face-detection design note."
     },
     "phash": {
       "type": ["string", "null"],

@@ -120,10 +120,17 @@ is a circular import — that already happened once.
   half-configured machine cannot reach a cloud API (or, for faces, silently start
   a multi-hour detection pass).
 - **Face embeddings never leave the agent.** Face clustering (`catalog/people.py`)
-  stores bounding boxes and raw embedding vectors only in the local SQLite
-  catalog; Firestore only ever sees an opaque `person_ids` array per item. No
-  biometric data reaches the cloud, by construction, not by a rule someone has
-  to remember to follow.
+  stores raw embedding vectors only in the local SQLite catalog — the actual
+  biometric fingerprint, the thing that makes a face matchable/identifiable,
+  by construction never reaches the cloud, not by a rule someone has to
+  remember to follow. **Bounding boxes are the one deliberate, narrow
+  exception**: each published item's `faces` array (see
+  `item.schema.json`) pairs a `person_id` with just that face's location in
+  the frame, normalized to a 0-1 fraction of the image's own dimensions —
+  enough for the web's People tab to crop a person's thumbnail to their
+  actual face via CSS, nothing more. A box alone reveals nothing about who
+  someone is without the embedding it's paired with locally; publishing it
+  is not a step toward publishing anything that would.
 
 ## Deduplication rules — do not relax these
 

@@ -7,6 +7,11 @@
 // in the REGISTRY (fetch_fullres, delete, copy, index, dedup_source,
 // publish, stage_for_amazon, ...), not just Amazon staging, so this belongs
 // in the shared header rather than the Amazon tab.
+//
+// Deliberately just three bare dots, no always-visible text -- the detail
+// (last-run time, what happened) only shows on hover (desktop, via the
+// native `title` tooltip) or tap (touch, via a small custom bubble, since
+// `title` has no real tap equivalent on a phone).
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase.js";
 
@@ -18,6 +23,7 @@ const REFRESH_MS = 30 * 1000;
 
 let el = null;
 let timer = null;
+let bubble = null;
 
 // `schedules` is keyed by a dynamic name (e.g. "index_nas") that follows
 // whatever *_SOURCE env var the agent is configured with — there's only
@@ -41,10 +47,7 @@ function scheduleState(entry) {
   // generous-margin reasoning as STALE_AFTER_MS above, just scaled to a
   // multi-day cadence instead of a multi-minute one.
   const isLive = ageDays <= (entry.interval_days || 7) * 1.5;
-  return {
-    cls: isLive ? "is-live" : "is-stale",
-    text: isLive ? "ok" : "overdue",
-  };
+  return { cls: isLive ? "is-live" : "is-stale" };
 }
 
 function scheduleTitle(label, entry) {
@@ -59,6 +62,34 @@ function scheduleTitle(label, entry) {
   return `${label}: last ran ${when} (every ${entry.interval_days}d)\n${entry.detail || ""}`.trim();
 }
 
+// Tap-to-reveal for touch devices, where hover/`title` doesn't really work.
+// One shared bubble, repositioned under whichever dot was tapped; tapping
+// the same dot again (or anywhere else) closes it — same open/close-on-
+// outside-click shape as photoModal.js's own ⋮ menu.
+function toggleBubble(dotEl, text) {
+  if (bubble && bubble.dataset.forDot === dotEl.dataset.row) {
+    bubble.remove();
+    bubble = null;
+    return;
+  }
+  if (bubble) bubble.remove();
+  bubble = document.createElement("div");
+  bubble.className = "agent-heartbeat-bubble";
+  bubble.textContent = text;
+  bubble.dataset.forDot = dotEl.dataset.row;
+  el.appendChild(bubble);
+  const dotRect = dotEl.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  bubble.style.left = `${dotRect.left - elRect.left + dotRect.width / 2}px`;
+}
+
+function closeBubble() {
+  if (bubble) {
+    bubble.remove();
+    bubble = null;
+  }
+}
+
 async function refresh() {
   let data = null;
   try {
@@ -68,55 +99,47 @@ async function refresh() {
     console.error(err);
   }
 
-  // -- process-intents row --
+  // -- process-intents dot --
   const last = data?.last_poll_at;
-  const dot = el.querySelector('[data-row="intents"] .agent-heartbeat-dot');
-  const label = el.querySelector('[data-row="intents"] .agent-heartbeat-label');
+  const dot = el.querySelector('[data-row="intents"]');
   const age = last ? Date.now() - new Date(last).getTime() : Infinity;
   const isLive = age <= STALE_AFTER_MS;
   dot.className = `agent-heartbeat-dot ${isLive ? "is-live" : "is-stale"}`;
   if (!last) {
-    label.textContent = "agent not watching for requests";
-    dot.title = "No heartbeat recorded yet.";
+    dot.title = "Intents: no heartbeat recorded yet.";
   } else if (isLive) {
-    label.textContent = `watching — checked ${new Date(last).toLocaleTimeString()}`;
-    dot.title = `Watching for requests. Last checked ${new Date(last).toLocaleString()}.`;
+    dot.title = `Intents: watching for requests. Last checked ${new Date(last).toLocaleString()}.`;
   } else {
-    label.textContent = `not watching — last checked ${new Date(last).toLocaleString()}`;
-    dot.title = `No heartbeat in over ${Math.round(STALE_AFTER_MS / 60000)} minutes.`;
+    dot.title = `Intents: no heartbeat in over ${Math.round(STALE_AFTER_MS / 60000)} minutes.`;
   }
 
-  // -- index / cold-archive rows --
+  // -- index / cold-archive dots --
   for (const [row, prefix, displayName] of [
     ["index", "index_", "Index"],
     ["cold-archive", "cold_archive_", "Cold-archive"],
   ]) {
     const entry = pickByPrefix(data?.schedules, prefix);
     const state = scheduleState(entry);
-    const rowDot = el.querySelector(`[data-row="${row}"] .agent-heartbeat-dot`);
-    const rowLabel = el.querySelector(`[data-row="${row}"] .agent-heartbeat-label`);
+    const rowDot = el.querySelector(`[data-row="${row}"]`);
     rowDot.className = `agent-heartbeat-dot ${state.cls}`;
     rowDot.title = scheduleTitle(displayName, entry);
-    rowLabel.textContent = `${displayName}: ${state.text}`;
   }
 }
 
 export function start(container) {
   el = container;
   el.innerHTML = `
-    <span class="agent-heartbeat-row" data-row="intents">
-      <span class="agent-heartbeat-dot"></span>
-      <span class="agent-heartbeat-label">checking…</span>
-    </span>
-    <span class="agent-heartbeat-row" data-row="index">
-      <span class="agent-heartbeat-dot"></span>
-      <span class="agent-heartbeat-label">Index: checking…</span>
-    </span>
-    <span class="agent-heartbeat-row" data-row="cold-archive">
-      <span class="agent-heartbeat-dot"></span>
-      <span class="agent-heartbeat-label">Cold-archive: checking…</span>
-    </span>
+    <span class="agent-heartbeat-dot" data-row="intents" tabindex="0"></span>
+    <span class="agent-heartbeat-dot" data-row="index" tabindex="0"></span>
+    <span class="agent-heartbeat-dot" data-row="cold-archive" tabindex="0"></span>
   `;
+  for (const dot of el.querySelectorAll(".agent-heartbeat-dot")) {
+    dot.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleBubble(dot, dot.title);
+    });
+  }
+  document.addEventListener("click", closeBubble);
   refresh();
   timer = setInterval(refresh, REFRESH_MS);
 }
@@ -124,4 +147,6 @@ export function start(container) {
 export function stop() {
   clearInterval(timer);
   timer = null;
+  closeBubble();
+  document.removeEventListener("click", closeBubble);
 }

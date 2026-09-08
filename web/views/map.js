@@ -4,19 +4,31 @@
 // composite index since both clauses are on the one field (same trick
 // Browse's year-jump uses on mtime — see that file's header comment).
 //
+// Photos taken within a few dozen meters of each other (the same room, the
+// same event) get grouped under one marker rather than stacking unusable
+// individual pins on top of each other — clicking it opens the shared photo
+// modal on the whole group, giving the same left/right (or swipe)
+// navigation Browse already has, instead of a one-photo-at-a-time popup.
+//
 // Leaflet + OpenStreetMap tiles: no API key, no cost, loaded from a CDN only
 // when this view is actually opened (not on every page load).
 import {
   collection, query, where, limit, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
-import { db, storage } from "../firebase.js";
-import { stageForAmazon } from "../intents.js";
+import { db } from "../firebase.js";
 import { loadHiddenPrefixes, isHidden } from "../hiddenFolders.js";
+import { openPhotoAt } from "../photoModal.js";
 
 // A browser map gets sluggish with tens of thousands of individual markers —
 // this is a preview of where your library has been, not a full data dump.
 const MAX_PINS = 2000;
+
+// Close enough to be "the same spot" (a room, a booth, a grave site) without
+// merging genuinely different nearby locations (the next building over).
+// Real-world meters, not raw lat/lng degrees -- a degree of longitude is a
+// very different distance depending on latitude, so a naive coordinate
+// threshold would cluster inconsistently around the world.
+const CLUSTER_RADIUS_METERS = 75;
 
 let root = null;
 let statusEl = null;
@@ -49,51 +61,70 @@ async function loadGeotaggedItems() {
   return snap.docs.map((d) => d.data()).filter((item) => !isHidden(item.item_id, hiddenPrefixes));
 }
 
-function popupContent(item) {
-  const wrap = document.createElement("div");
-  wrap.className = "map-popup";
-  const img = document.createElement("img");
-  getDownloadURL(ref(storage, item.thumbnail_key))
-    .then((url) => { img.src = url; })
-    .catch((err) => console.error(item.item_id, err));
-  const name = document.createElement("div");
-  name.className = "map-popup-name";
-  // Just the filename, not the full NAS path -- item.item_id is a folder
-  // structure like "percial/Photos/MobileBackup/iPhone/2025/10/img.jpg",
-  // meaningless as a caption. photoModal.js already makes this same Name
-  // vs. Path distinction (item.name is the plain filename the catalog
-  // already carries); this popup is a lightweight preview, so it only
-  // needs the short one.
-  name.textContent = item.name || item.item_id;
-
-  const stageBtn = document.createElement("button");
-  stageBtn.type = "button";
-  stageBtn.className = "map-popup-stage";
-  stageBtn.textContent = "Stage for Amazon";
-  const status = document.createElement("div");
-  status.className = "map-popup-status";
-  stageBtn.addEventListener("click", async () => {
-    stageBtn.disabled = true;
-    stageBtn.textContent = "Staging…";
-    try {
-      await stageForAmazon(item);
-      stageBtn.textContent = "Staged ✓";
-      status.textContent = "See the Amazon tab once the agent picks it up.";
-    } catch (err) {
-      stageBtn.disabled = false;
-      stageBtn.textContent = "Stage for Amazon";
-      status.textContent = `Failed: ${err.message}`;
-      console.error(item.item_id, err);
-    }
-  });
-
-  wrap.append(img, name, stageBtn, status);
-  return wrap;
+// Haversine distance in meters -- real-world distance, not raw coordinate
+// difference (see CLUSTER_RADIUS_METERS above for why that matters).
+function metersBetween(a, b) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-function addMarkers(Lmod, items) {
-  for (const item of items) {
-    Lmod.marker([item.latitude, item.longitude]).addTo(map).bindPopup(() => popupContent(item));
+// Greedy proximity clustering, same shape as duplicates.js's near-dup
+// grouping: not O(n log n)-optimal, but MAX_PINS caps this at a size where
+// the simple O(n^2) scan is cheap enough not to matter.
+function clusterByLocation(items) {
+  const used = new Set();
+  const clusters = [];
+  for (let i = 0; i < items.length; i++) {
+    if (used.has(i)) continue;
+    const group = [items[i]];
+    used.add(i);
+    for (let j = i + 1; j < items.length; j++) {
+      if (used.has(j)) continue;
+      if (metersBetween(items[i], items[j]) <= CLUSTER_RADIUS_METERS) {
+        group.push(items[j]);
+        used.add(j);
+      }
+    }
+    clusters.push(group);
+  }
+  return clusters;
+}
+
+function centroid(group) {
+  const lat = group.reduce((sum, i) => sum + i.latitude, 0) / group.length;
+  const lng = group.reduce((sum, i) => sum + i.longitude, 0) / group.length;
+  return [lat, lng];
+}
+
+// A small numbered badge for a cluster of more than one photo, so it's
+// obvious before clicking that there's more than one there.
+function clusterIcon(Lmod, count) {
+  return Lmod.divIcon({
+    className: "map-cluster-icon",
+    html: `<span>${count}</span>`,
+    iconSize: [28, 28],
+  });
+}
+
+function addMarkers(Lmod, clusters) {
+  for (const group of clusters) {
+    // Leaflet's own default pin only applies when the `icon` option key is
+    // absent entirely -- passing `icon: undefined` explicitly (even though
+    // it's falsy) still overwrites that default during option merging, and
+    // Leaflet then tries to call .createIcon() on undefined. So the key is
+    // only ever added for an actual cluster, never included-but-empty.
+    const options = group.length > 1 ? { icon: clusterIcon(Lmod, group.length) } : {};
+    const marker = Lmod.marker(centroid(group), options).addTo(map);
+    // Straight to the shared modal, same click-to-open behavior Browse
+    // already has, rather than a one-photo popup -- openPhotoAt gives the
+    // whole cluster prev/next navigation (and swipe, on a phone) for free.
+    marker.on("click", () => openPhotoAt(group, 0));
   }
 }
 
@@ -121,10 +152,12 @@ export async function mount(container) {
       return;
     }
 
-    addMarkers(Lmod, items);
+    const clusters = clusterByLocation(items);
+    addMarkers(Lmod, clusters);
     map.fitBounds(Lmod.latLngBounds(items.map((i) => [i.latitude, i.longitude])).pad(0.1));
     const capped = items.length === MAX_PINS ? ` (showing the first ${MAX_PINS})` : "";
-    statusEl.textContent = `${items.length} geotagged photo${items.length === 1 ? "" : "s"}${capped}.`;
+    const grouped = clusters.length < items.length ? `, ${clusters.length} location(s)` : "";
+    statusEl.textContent = `${items.length} geotagged photo${items.length === 1 ? "" : "s"}${grouped}${capped}.`;
   } catch (err) {
     statusEl.textContent = `Failed to load map: ${err.message}`;
     console.error(err);

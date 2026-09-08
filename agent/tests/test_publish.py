@@ -56,6 +56,19 @@ def facts(tmp_path):
 def _indexed(root, catalog, source="nas"):
     conn = NASConnector(str(root))
     scan(conn, catalog, source=source)
+    # NASConnector (the mount-based connector) stringifies item_id via
+    # Path.relative_to(), which uses the OS-native separator -- "/" on
+    # Linux (always true in the real container, and for the SMB connector
+    # production actually uses), backslashes if this suite runs directly
+    # on a Windows host. Normalizing here matches what every real
+    # deployment actually sees -- same fix as test_dedup.py's
+    # _normalize_item_ids, this file just never exercised it before now
+    # (it's Pillow-gated, and Pillow wasn't installed locally until this
+    # session's face-crop work needed to actually verify against it).
+    catalog.conn.execute(
+        "UPDATE items SET item_id = REPLACE(item_id, '\\', '/') WHERE source = ?",
+        (source,))
+    catalog.conn.commit()
     return conn
 
 
@@ -360,7 +373,11 @@ def test_cli_prints_the_actual_reason_for_a_partial_failure(tmp_path, capsys):
     assert exit_code == 0  # a partial failure isn't a command failure
     assert "Published 1 item(s)" in out
     assert "1 item(s) failed:" in out
-    assert "Photos/vanishes.jpg" in out
+    # NASConnector's error message embeds the item's own path, which is
+    # legitimately OS-native (a real filesystem-facing string, unlike
+    # item_id elsewhere) -- backslashes on Windows. Normalize before
+    # comparing, same reasoning as test_actions.py's dest-path assertion.
+    assert "Photos/vanishes.jpg" in out.replace("\\", "/")
     assert "not found" in out.lower()
 
 
@@ -470,6 +487,87 @@ def test_face_detection_is_idempotent_on_force_republish(nas, catalog, blobs, fa
     PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
 
     assert fake_insightface["calls"] == 1  # not called again
+
+
+# --------------------------------------------------------------------------- #
+# `faces`: person_id + normalized bbox, the one deliberate exception to
+# "no biometric data leaves the agent" -- see CLAUDE.md's design note.
+# Only the box crosses to Firestore, never the embedding.
+#
+# Exercised via a pre-seeded catalog.add_face() row rather than the
+# fake_insightface detect/assign pipeline above: this is exactly the
+# "already detected" path (need_faces=False, since `existing` is non-empty)
+# every re-publish of a previously-detected item actually takes, and it
+# isolates the normalization logic itself from the detect->assign->store
+# pipeline those other tests already cover.
+# --------------------------------------------------------------------------- #
+def test_faces_field_carries_a_bbox_normalized_to_image_dimensions(
+        nas, catalog, blobs, facts, fake_exiftool):
+    import json
+    fake_exiftool["result"] = [{"File:ImageWidth": 800, "File:ImageHeight": 600}]
+    conn = _indexed(nas, catalog)
+    # A bbox of (80,60,240,180) on an 800x600 image should normalize to
+    # (0.1, 0.1, 0.3, 0.3).
+    catalog.add_face("nas", "Photos/real.jpg", (80.0, 60.0, 240.0, 180.0), 0.9, b"\x00" * 4, 1)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    fact = json.loads((facts.root / "nas__Photos_real.jpg.json").read_text())
+    assert len(fact["faces"]) == 1
+    entry = fact["faces"][0]
+    assert entry["person_id"] == "1"
+    assert entry["person_id"] == fact["person_ids"][0]
+    assert entry["bbox"] == pytest.approx([0.1, 0.1, 0.3, 0.3])
+
+
+def test_faces_field_bbox_is_null_without_known_image_dimensions(
+        nas, catalog, blobs, facts):
+    """No EXIF (no fake_exiftool fixture here, so extraction yields {}) ->
+    no width/height to normalize against -> bbox stays null rather than a
+    meaningless or wrong fraction. Still publishes the person_id either way
+    -- a missing crop hint should never block the rest of publishing."""
+    import json
+    conn = _indexed(nas, catalog)
+    catalog.add_face("nas", "Photos/real.jpg", (80.0, 60.0, 240.0, 180.0), 0.9, b"\x00" * 4, 1)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    fact = json.loads((facts.root / "nas__Photos_real.jpg.json").read_text())
+    assert fact["faces"] == [{"person_id": "1", "bbox": None}]
+
+
+def test_faces_field_is_never_missing_the_embedding_only_the_bbox(
+        nas, catalog, blobs, facts, fake_exiftool):
+    """The whole point: person_id + location crosses to Firestore, the
+    embedding itself never does, under any key."""
+    fake_exiftool["result"] = [{"File:ImageWidth": 800, "File:ImageHeight": 600}]
+    conn = _indexed(nas, catalog)
+    real_embedding = b"\x01\x02\x03\x04" * 32
+    catalog.add_face("nas", "Photos/real.jpg", (80.0, 60.0, 240.0, 180.0), 0.9, real_embedding, 1)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    raw = (facts.root / "nas__Photos_real.jpg.json").read_text()
+    assert "embedding" not in raw
+    assert "\\u0001\\u0002\\u0003\\u0004" not in raw
+
+
+def test_faces_field_still_populates_on_a_force_republish(
+        nas, catalog, blobs, facts, fake_exiftool):
+    """A --force republish of an item whose faces were already detected in
+    an earlier run (need_faces=False, so detection itself doesn't re-run)
+    must still emit `faces` from the existing rows, not leave it empty."""
+    import json
+    fake_exiftool["result"] = [{"File:ImageWidth": 800, "File:ImageHeight": 600}]
+    conn = _indexed(nas, catalog)
+    catalog.add_face("nas", "Photos/real.jpg", (80.0, 60.0, 240.0, 180.0), 0.9, b"\x00" * 4, 1)
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    PublishAction("nas", conn, catalog, blobs, facts, force=True).run(commit=True)
+
+    fact = json.loads((facts.root / "nas__Photos_real.jpg.json").read_text())
+    assert len(fact["faces"]) == 1
+    assert fact["faces"][0]["bbox"] == pytest.approx([0.1, 0.1, 0.3, 0.3])
 
 
 # --------------------------------------------------------------------------- #

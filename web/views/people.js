@@ -23,10 +23,34 @@ let root = null;
 let breadcrumbEl = null;
 let statusEl = null;
 let gridEl = null;
-let people = new Map(); // personId -> { items: [] }
+let people = new Map(); // personId -> { entries: [{item, bbox}] }
 
 function personLabel(personId, count) {
   return `Person ${personId} · ${count} photo${count === 1 ? "" : "s"}`;
+}
+
+// Zooms the already object-fit:cover-filled thumbnail toward the specific
+// face this tile represents, using item.faces' normalized [x1,y1,x2,y2]
+// (see maintenance.py's PublishAction) rather than showing whatever
+// object-fit's own default centering happened to crop to -- the whole
+// point of this view is "which person," and a random center-crop of a
+// group photo often doesn't even include them. transform-origin at the
+// face's center point plus a uniform scale zooms toward it without
+// distorting the image, same trick as a CSS "face-aware thumbnail."
+// No-op (leaves the plain cover-fit image) when bbox is unknown --
+// items published before this field existed, until they're republished.
+function applyFaceCrop(img, bbox) {
+  if (!bbox) return;
+  const [x1, y1, x2, y2] = bbox;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  const faceSpan = Math.max(x2 - x1, y2 - y1, 0.05);
+  // Zoom so the face's longer side fills ~60% of the tile, capped 1x-3x --
+  // enough to actually isolate a face in a big group shot without going
+  // absurd on a tiny, low-resolution detection.
+  const zoom = Math.min(3, Math.max(1, 0.6 / faceSpan));
+  img.style.transformOrigin = `${cx * 100}% ${cy * 100}%`;
+  img.style.transform = `scale(${zoom})`;
 }
 
 function renderBreadcrumb(personId) {
@@ -59,29 +83,32 @@ function renderPersonTile(personId, info) {
   img.loading = "lazy";
   const label = document.createElement("div");
   label.className = "person-label";
-  label.textContent = personLabel(personId, info.items.length);
+  label.textContent = personLabel(personId, info.entries.length);
   tile.append(img, label);
   tile.addEventListener("click", () => openPerson(personId));
 
-  getDownloadURL(ref(storage, info.items[0].thumbnail_key))
+  const cover = info.entries[0];
+  applyFaceCrop(img, cover.bbox);
+  getDownloadURL(ref(storage, cover.item.thumbnail_key))
     .then((url) => { img.src = url; })
     .catch((err) => { tile.classList.add("broken"); console.error(personId, err); });
 
   gridEl.appendChild(tile);
 }
 
-function renderPhotoCard(item, index, personItems) {
+function renderPhotoCard(entry, index, personItems) {
   const card = document.createElement("div");
   card.className = "card";
   const img = document.createElement("img");
-  img.alt = item.name || item.item_id;
+  img.alt = entry.item.name || entry.item.item_id;
   img.loading = "lazy";
   card.appendChild(img);
   card.addEventListener("click", () => openPhotoAt(personItems, index));
 
-  getDownloadURL(ref(storage, item.thumbnail_key))
+  applyFaceCrop(img, entry.bbox);
+  getDownloadURL(ref(storage, entry.item.thumbnail_key))
     .then((url) => { img.src = url; })
-    .catch((err) => { card.classList.add("broken"); console.error(item.item_id, err); });
+    .catch((err) => { card.classList.add("broken"); console.error(entry.item.item_id, err); });
 
   gridEl.appendChild(card);
 }
@@ -95,7 +122,7 @@ function renderPeopleGrid() {
     : "No faces detected yet — publish with FACES_LIVE=1 to find some.";
   // Most-photographed first — the people actually worth looking at tend to
   // be the ones with the most photos, not whatever order Firestore returned.
-  const sorted = [...people.entries()].sort((a, b) => b[1].items.length - a[1].items.length);
+  const sorted = [...people.entries()].sort((a, b) => b[1].entries.length - a[1].entries.length);
   for (const [personId, info] of sorted) renderPersonTile(personId, info);
 }
 
@@ -104,8 +131,11 @@ function openPerson(personId) {
   renderBreadcrumb(personId);
   gridEl.innerHTML = "";
   gridEl.className = "grid";
-  statusEl.textContent = personLabel(personId, info.items.length);
-  info.items.forEach((item, i) => renderPhotoCard(item, i, info.items));
+  statusEl.textContent = personLabel(personId, info.entries.length);
+  // openPhotoAt (prev/next navigation) needs the plain item list, not the
+  // {item, bbox} pairs each grid tile itself needs for its own crop.
+  const rawItems = info.entries.map((e) => e.item);
+  info.entries.forEach((entry, i) => renderPhotoCard(entry, i, rawItems));
 }
 
 async function load() {
@@ -117,9 +147,17 @@ async function load() {
     people = new Map();
     for (const doc of snap.docs) {
       const item = doc.data();
-      for (const personId of item.person_ids || []) {
-        if (!people.has(personId)) people.set(personId, { items: [] });
-        people.get(personId).items.push(item);
+      // Prefer `faces` (person_id + this face's own bbox, see
+      // maintenance.py's PublishAction) -- falls back to the older
+      // `person_ids`-only shape for anything published before that field
+      // existed, so those items keep showing up here, just without a
+      // face-aware crop until republished.
+      const faceList = item.faces && item.faces.length
+        ? item.faces
+        : (item.person_ids || []).map((personId) => ({ person_id: personId, bbox: null }));
+      for (const face of faceList) {
+        if (!people.has(face.person_id)) people.set(face.person_id, { entries: [] });
+        people.get(face.person_id).entries.push({ item, bbox: face.bbox });
       }
     }
     renderPeopleGrid();
