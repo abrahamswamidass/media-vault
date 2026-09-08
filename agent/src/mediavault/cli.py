@@ -461,6 +461,7 @@ def cmd_stats(args) -> int:
                 "indexed": catalog.count(source),
                 "archived": catalog.count(source, state="archived"),
                 "published": catalog.published_count(source),
+                "cold_archived": catalog.cold_archived_count(source),
                 "duplicate_groups": len(catalog.duplicate_groups(source)),
                 "reclaimable_bytes": catalog.wasted_bytes(source),
             })
@@ -470,11 +471,11 @@ def cmd_stats(args) -> int:
             return 0
 
         print(f"{'source':10} {'indexed':>10} {'archived':>10} {'published':>10} "
-              f"{'dup groups':>12} {'reclaimable':>13}")
+              f"{'cold-arch':>10} {'dup groups':>12} {'reclaimable':>13}")
         for r in rows:
             print(f"{r['source']:10} {r['indexed']:>10,} {r['archived']:>10,} "
-                  f"{r['published']:>10,} {r['duplicate_groups']:>12,} "
-                  f"{_human(r['reclaimable_bytes']):>13}")
+                  f"{r['published']:>10,} {r['cold_archived']:>10,} "
+                  f"{r['duplicate_groups']:>12,} {_human(r['reclaimable_bytes']):>13}")
         return 0
 
 
