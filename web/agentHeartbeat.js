@@ -65,7 +65,10 @@ function scheduleTitle(label, entry) {
 // Tap-to-reveal for touch devices, where hover/`title` doesn't really work.
 // One shared bubble, repositioned under whichever dot was tapped; tapping
 // the same dot again (or anywhere else) closes it — same open/close-on-
-// outside-click shape as photoModal.js's own ⋮ menu.
+// outside-click shape as photoModal.js's own ⋮ menu. Positioning is pure
+// CSS (right: 0, anchored to the header's own right edge) since the dots
+// sit close to the viewport's right edge -- centering a wide bubble under
+// whichever dot was tapped risked overflowing off-screen.
 function toggleBubble(dotEl, text) {
   if (bubble && bubble.dataset.forDot === dotEl.dataset.row) {
     bubble.remove();
@@ -78,9 +81,6 @@ function toggleBubble(dotEl, text) {
   bubble.textContent = text;
   bubble.dataset.forDot = dotEl.dataset.row;
   el.appendChild(bubble);
-  const dotRect = dotEl.getBoundingClientRect();
-  const elRect = el.getBoundingClientRect();
-  bubble.style.left = `${dotRect.left - elRect.left + dotRect.width / 2}px`;
 }
 
 function closeBubble() {

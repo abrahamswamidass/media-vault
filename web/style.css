@@ -282,6 +282,7 @@ nav a.active {
 .modal {
   position: fixed;
   inset: 0;
+  z-index: 10000; /* above Leaflet's own controls (z-index: 1000) on the Map view */
   background: rgba(0, 0, 0, 0.8);
   align-items: center;
   justify-content: center;
@@ -685,16 +686,21 @@ nav a.active {
 .agent-heartbeat-bubble {
   position: absolute;
   top: 100%;
-  transform: translateX(-50%);
+  right: 0; /* anchored to the header's own right edge, not centered under
+               the tapped dot -- the dots sit near the viewport's right
+               edge, so a centered wide bubble could overflow off-screen;
+               extending left instead always has room */
   margin-top: 0.5rem;
-  padding: 0.5rem 0.7rem;
+  padding: 0.6rem 0.8rem;
   background: #222;
   color: #eee;
   border: 1px solid #444;
   border-radius: 6px;
   font-size: 0.75rem;
+  line-height: 1.4;
   white-space: pre-line;
-  max-width: 16rem;
+  width: max-content;
+  max-width: min(22rem, 90vw);
   z-index: 20;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
