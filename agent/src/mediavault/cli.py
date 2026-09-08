@@ -668,9 +668,14 @@ def _process_intents_once(args, intents_store, catalog) -> tuple[int, int]:
     return done, failed
 
 
-#: Name under which the weekly cold-archive run's last-completed timestamp
-#: is tracked in the catalog's `schedules` table.
-_COLD_ARCHIVE_SCHEDULE_NAME = "cold_archive_nas"
+def _schedule_due(catalog, name: str, interval_days: int) -> bool:
+    """True if a named periodic task (see the `schedules` table) has never
+    run, or last ran at least `interval_days` ago."""
+    last = catalog.get_last_scheduled_run(name)
+    if not last:
+        return True
+    elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(last)
+    return elapsed.total_seconds() >= interval_days * 86400
 
 
 def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
@@ -678,7 +683,9 @@ def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
     COLD_ARCHIVE_SCHEDULE=1 -- off by default, same as every other live
     switch in this project. Interval is configurable via
     COLD_ARCHIVE_INTERVAL_DAYS (default 7); the source via
-    COLD_ARCHIVE_SOURCE (default "nas").
+    COLD_ARCHIVE_SOURCE (default "nas") -- the schedule name is derived
+    from that source, so pointing this at a different source later doesn't
+    collide with (or reuse) another source's own schedule.
 
     Deliberately checks for the one combination that would make
     _coldstore_for() raise (GCS_LIVE=1 with no bucket set) before calling
@@ -694,14 +701,12 @@ def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
               "is not set -- skipping.")
         return
 
-    interval_days = int(os.getenv("COLD_ARCHIVE_INTERVAL_DAYS", "7"))
-    last = catalog.get_last_scheduled_run(_COLD_ARCHIVE_SCHEDULE_NAME)
-    if last:
-        elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(last)
-        if elapsed.total_seconds() < interval_days * 86400:
-            return
-
     source = os.getenv("COLD_ARCHIVE_SOURCE", "nas")
+    schedule_name = f"cold_archive_{source}"
+    interval_days = int(os.getenv("COLD_ARCHIVE_INTERVAL_DAYS", "7"))
+    if not _schedule_due(catalog, schedule_name, interval_days):
+        return
+
     print(f"  weekly cold-archive due for '{source}' — running now", flush=True)
     try:
         connector = _connector_for(source, args)
@@ -716,9 +721,43 @@ def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
         # surfacing every cycle rather than going silent for a week, the
         # same tolerance process-intents itself already has for retrying a
         # failed poll on the very next cycle.
-        catalog.mark_scheduled_run(_COLD_ARCHIVE_SCHEDULE_NAME)
+        catalog.mark_scheduled_run(schedule_name)
     except Exception as e:
         print(f"  cold-archive schedule failed: {e}")
+
+
+def _maybe_run_scheduled_index(args, catalog) -> None:
+    """Runs `index` on a persisted schedule, opt-in via INDEX_SCHEDULE=1.
+    Same shape as _maybe_run_scheduled_cold_archive -- interval via
+    INDEX_INTERVAL_DAYS (default 7), source via INDEX_SOURCE (default
+    "nas"), schedule name derived from the source.
+
+    Resumable the same way a manual `index` is: if a previous scheduled
+    run got interrupted (container recreated mid-scan), this picks up
+    from the saved checkpoint rather than re-walking from the start.
+    """
+    if os.getenv("INDEX_SCHEDULE", "0") != "1":
+        return
+
+    source = os.getenv("INDEX_SOURCE", "nas")
+    schedule_name = f"index_{source}"
+    interval_days = int(os.getenv("INDEX_INTERVAL_DAYS", "7"))
+    if not _schedule_due(catalog, schedule_name, interval_days):
+        return
+
+    print(f"  weekly index due for '{source}' — running now", flush=True)
+    try:
+        connector = _connector_for(source, args)
+        report = scanner.scan(connector, catalog, source=source, resume=True)
+        print(f"  index: {report.files_indexed:,} file(s) across "
+              f"{report.directories:,} director(y/ies), {report.errors} error(s)")
+        # Same reasoning as cold-archive above: only marked on a completed
+        # pass, so a connector-construction failure (bad SMB creds, NAS
+        # unreachable) keeps surfacing every cycle instead of going silent
+        # for a week.
+        catalog.mark_scheduled_run(schedule_name)
+    except Exception as e:
+        print(f"  index schedule failed: {e}")
 
 
 def _stop_on_sigterm(signum, frame):
@@ -771,6 +810,7 @@ def cmd_process_intents(args) -> int:
                     intents_store.heartbeat(still_pending)
                 except Exception as e:
                     print(f"  (heartbeat failed: {e})")
+                _maybe_run_scheduled_index(args, catalog)
                 _maybe_run_scheduled_cold_archive(args, catalog)
                 time.sleep(args.interval)
         except KeyboardInterrupt:
