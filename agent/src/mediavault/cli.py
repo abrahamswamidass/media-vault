@@ -394,6 +394,32 @@ def cmd_publish(args) -> int:
 # --------------------------------------------------------------------------- #
 # cold-archive
 # --------------------------------------------------------------------------- #
+def _run_cold_archive(rows, connector, coldstore, catalog, *, commit,
+                      log_dir=None, on_item=None) -> dict:
+    """Push a pre-fetched batch of `not_cold_archived()` rows. Shared by the
+    `cold-archive` CLI command and the scheduled weekly run inside
+    `process-intents --watch` -- one place owning the actual loop keeps
+    them from drifting apart. `on_item(row, result)`, if given, fires after
+    each action for callers that want their own per-item output."""
+    log = ActionLog(log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+    pushed = failed = noop = 0
+    pushed_bytes = 0
+    for row in rows:
+        result = log.record(
+            ColdArchiveAction(row["item_id"], connector, coldstore, catalog)
+            .run(commit=commit))
+        if on_item:
+            on_item(row, result)
+        if result.status == "failed":
+            failed += 1
+        elif result.status == "no-op":
+            noop += 1
+        elif commit:
+            pushed += 1
+            pushed_bytes += row["size"] or 0
+    return {"pushed": pushed, "failed": failed, "noop": noop, "pushed_bytes": pushed_bytes}
+
+
 def cmd_cold_archive(args) -> int:
     connector = _connector_for(args.source, args)
     coldstore = _coldstore_for(args)
@@ -413,35 +439,27 @@ def cmd_cold_archive(args) -> int:
         capped = " (--max-items cap)" if args.max_items else ""
         print(f"{len(rows)} file(s) not yet in cold storage, {_human(total_bytes)}{capped}.\n")
 
-        log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
-        pushed = failed = noop = 0
-        pushed_bytes = 0
-
-        for row in rows:
-            result = log.record(
-                ColdArchiveAction(row["item_id"], connector, coldstore, catalog)
-                .run(commit=args.commit))
+        def on_item(row, result):
             if result.status == "failed":
-                failed += 1
                 print(f"  ! {row['item_id']}: {result.detail}")
-            elif result.status == "no-op":
-                noop += 1
-            elif args.commit:
-                pushed += 1
-                pushed_bytes += row["size"] or 0
+            elif args.commit and result.status == "ok":
                 print(f"  + {row['item_id']} ({_human(row['size'] or 0)})")
+
+        summary = _run_cold_archive(rows, connector, coldstore, catalog,
+                                    commit=args.commit, log_dir=args.log_dir,
+                                    on_item=on_item)
 
         _banner(args.commit)
         if args.commit:
-            print(f"Pushed {pushed} file(s), {_human(pushed_bytes)}, to cold storage "
-                  f"({coldstore.name}). NAS originals left in place.")
-            if noop:
-                print(f"{noop} already there (caught up by a prior run).")
-            if failed:
-                print(f"{failed} failed — see the journal.")
+            print(f"Pushed {summary['pushed']} file(s), {_human(summary['pushed_bytes'])}, "
+                  f"to cold storage ({coldstore.name}). NAS originals left in place.")
+            if summary["noop"]:
+                print(f"{summary['noop']} already there (caught up by a prior run).")
+            if summary["failed"]:
+                print(f"{summary['failed']} failed — see the journal.")
         else:
             print(f"Would push {len(rows)} file(s), {_human(total_bytes)}.")
-        return 0 if not failed else 1
+        return 0 if not summary["failed"] else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -650,6 +668,59 @@ def _process_intents_once(args, intents_store, catalog) -> tuple[int, int]:
     return done, failed
 
 
+#: Name under which the weekly cold-archive run's last-completed timestamp
+#: is tracked in the catalog's `schedules` table.
+_COLD_ARCHIVE_SCHEDULE_NAME = "cold_archive_nas"
+
+
+def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
+    """Runs cold-archive on a persisted weekly schedule, opt-in via
+    COLD_ARCHIVE_SCHEDULE=1 -- off by default, same as every other live
+    switch in this project. Interval is configurable via
+    COLD_ARCHIVE_INTERVAL_DAYS (default 7); the source via
+    COLD_ARCHIVE_SOURCE (default "nas").
+
+    Deliberately checks for the one combination that would make
+    _coldstore_for() raise (GCS_LIVE=1 with no bucket set) before calling
+    it, rather than letting that SystemExit propagate out of this function
+    and kill the whole watch loop. GCS_LIVE=0 is left alone -- same as
+    every other cloud-facing command, that's the safe local-folder
+    fallback, not a misconfiguration.
+    """
+    if os.getenv("COLD_ARCHIVE_SCHEDULE", "0") != "1":
+        return
+    if os.getenv("GCS_LIVE", "0") == "1" and not os.getenv("COLD_STORAGE_BUCKET"):
+        print("  COLD_ARCHIVE_SCHEDULE=1 with GCS_LIVE=1 but COLD_STORAGE_BUCKET "
+              "is not set -- skipping.")
+        return
+
+    interval_days = int(os.getenv("COLD_ARCHIVE_INTERVAL_DAYS", "7"))
+    last = catalog.get_last_scheduled_run(_COLD_ARCHIVE_SCHEDULE_NAME)
+    if last:
+        elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(last)
+        if elapsed.total_seconds() < interval_days * 86400:
+            return
+
+    source = os.getenv("COLD_ARCHIVE_SOURCE", "nas")
+    print(f"  weekly cold-archive due for '{source}' — running now", flush=True)
+    try:
+        connector = _connector_for(source, args)
+        coldstore = _coldstore_for(args)
+        rows = catalog.not_cold_archived(source)
+        summary = _run_cold_archive(rows, connector, coldstore, catalog, commit=True)
+        print(f"  cold-archive: pushed {summary['pushed']} file(s), "
+              f"{_human(summary['pushed_bytes'])} "
+              f"({summary['noop']} already there, {summary['failed']} failed)")
+        # Marked only on a completed pass, not from inside the try above on
+        # a construction failure -- a real misconfiguration should keep
+        # surfacing every cycle rather than going silent for a week, the
+        # same tolerance process-intents itself already has for retrying a
+        # failed poll on the very next cycle.
+        catalog.mark_scheduled_run(_COLD_ARCHIVE_SCHEDULE_NAME)
+    except Exception as e:
+        print(f"  cold-archive schedule failed: {e}")
+
+
 def _stop_on_sigterm(signum, frame):
     """`docker stop` sends SIGTERM, not the SIGINT Ctrl+C sends — routed to
     the same KeyboardInterrupt process-intents --watch's own try/except
@@ -700,6 +771,7 @@ def cmd_process_intents(args) -> int:
                     intents_store.heartbeat(still_pending)
                 except Exception as e:
                     print(f"  (heartbeat failed: {e})")
+                _maybe_run_scheduled_cold_archive(args, catalog)
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nStopped.")

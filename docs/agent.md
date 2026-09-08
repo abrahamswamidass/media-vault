@@ -35,7 +35,7 @@ what each command actually touches.
 | `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
 | `process-intents` | Preview what the web module has requested — read-only, claims/runs nothing. |
 | `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. One pass. See [web.md](web.md#staging-a-photo-for-amazon). |
-| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds. This is the container's own default command (see [setup.md](setup.md)) — you don't normally need to run it yourself. If you do run it manually, use `docker exec -it` so Ctrl+C actually stops it. |
+| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds. This is the container's own default command (see [setup.md](setup.md)) — you don't normally need to run it yourself. If you do run it manually, use `docker exec -it` so Ctrl+C actually stops it. Also checks each cycle whether a weekly cold-archive run is due, if `COLD_ARCHIVE_SCHEDULE=1` — see [Cold storage](#cold-storage). |
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 | `people-reset --commit` | Wipe all detected faces/people to redo clustering — leaves items, scans, and published facts untouched. |
@@ -341,6 +341,25 @@ entire library over a home connection:
 ```powershell
 docker exec media-vault-container python -m mediavault.cli cold-archive nas --max-items 20 --commit
 ```
+
+**Running it automatically on a weekly schedule**: opt in with
+`COLD_ARCHIVE_SCHEDULE=1` on the `docker run` command — `process-intents
+--watch` (the container's default command) checks on every poll cycle
+whether 7+ days have passed since the last scheduled run, and kicks one off
+if so. The "last ran" timestamp lives in the catalog (on the mounted
+`/data/catalog` volume), not an in-memory timer, so the schedule survives a
+container recreation instead of resetting to zero every time you pull a new
+image — something that happens often enough in normal use that a naive
+sleep-based weekly timer would rarely actually complete a full week.
+Configurable via:
+- `COLD_ARCHIVE_SCHEDULE=1` — required, off by default like every other live switch.
+- `COLD_ARCHIVE_INTERVAL_DAYS` — default `7`.
+- `COLD_ARCHIVE_SOURCE` — default `nas`.
+
+A manual `cold-archive nas --commit` run at any time doesn't interfere with
+this — they share the same idempotent push logic, so an overlapping run
+just means some files get a redundant (harmless) exists-check instead of
+being re-uploaded.
 
 Cold storage retrieval isn't free — Archive class charges a per-GB fee to
 read data back out, on top of normal network egress, and has a 365-day

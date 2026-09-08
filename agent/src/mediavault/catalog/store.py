@@ -71,6 +71,16 @@ CREATE TABLE IF NOT EXISTS scans (
     complete    INTEGER NOT NULL DEFAULT 0
 );
 
+-- Tracks when a periodic background task (e.g. the weekly cold-archive
+-- run inside `process-intents --watch`) last completed. Lives here rather
+-- than an in-memory timer specifically so the schedule survives container
+-- recreation -- the catalog file sits on a mounted volume, a sleep timer
+-- would not.
+CREATE TABLE IF NOT EXISTS schedules (
+    name        TEXT PRIMARY KEY,
+    last_run_at TEXT NOT NULL
+);
+
 -- A person is a cluster of faces believed to be the same individual.
 -- Unnamed (name IS NULL) until labeled — clustering itself never assigns a
 -- name, only groups faces together for a person to do that once. Declared
@@ -326,6 +336,20 @@ class Catalog:
              exif.get("focal_length_35mm"), exif.get("metering_mode"),
              exif.get("flash"), source, item_id),
         )
+
+    def get_last_scheduled_run(self, name: str) -> Optional[str]:
+        """ISO-8601 timestamp of when a named periodic task last ran, or
+        None if it never has. See `schedules` table docstring."""
+        row = self.conn.execute(
+            "SELECT last_run_at FROM schedules WHERE name = ?", (name,)).fetchone()
+        return row["last_run_at"] if row else None
+
+    def mark_scheduled_run(self, name: str) -> None:
+        self.conn.execute(
+            "INSERT INTO schedules (name, last_run_at) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET last_run_at = excluded.last_run_at",
+            (name, _now()))
+        self.conn.commit()
 
     def mark_cold_archived(self, source: str, item_id: str) -> None:
         """Flag an item as pushed to cold storage. Re-run-proof: a later
