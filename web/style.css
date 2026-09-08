@@ -540,6 +540,19 @@ nav a.active {
   text-overflow: ellipsis;
 }
 
+/* The Unsorted catch-all (see people.js's isUnsorted()) -- a dashed border
+   marks it as not an ordinary result at a glance: singles and
+   low-confidence detections grouped together, not a real distinct person. */
+.person-card.unsorted {
+  outline: 2px dashed #555;
+  outline-offset: -2px;
+}
+
+.person-card.unsorted .person-label {
+  color: #999;
+  font-style: italic;
+}
+
 .amazon-list {
   display: flex;
   flex-direction: column;

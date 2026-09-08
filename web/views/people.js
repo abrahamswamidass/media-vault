@@ -19,14 +19,32 @@ import { openPhotoAt } from "../photoModal.js";
 
 const SCAN_LIMIT = 5000;
 
+// insightface's det_score, roughly 0-1. Below this, a detection is more
+// likely a false positive (a pattern/texture mistaken for a face) than a
+// genuine low-quality photo of a real one — clusters this unsure about,
+// or with only one photo ever (too little evidence either way), get
+// pulled out of the main grid into one Unsorted bucket instead of
+// cluttering it with zoomed-in crops of clothing or textures.
+const LOW_SCORE_THRESHOLD = 0.5;
+
 let root = null;
 let breadcrumbEl = null;
 let statusEl = null;
 let gridEl = null;
-let people = new Map(); // personId -> { entries: [{item, bbox}] }
+let people = new Map(); // personId -> { entries: [{item, bbox, score}] }
+let unsorted = []; // entries pulled out of `people` per isUnsorted() below
 
 function personLabel(personId, count) {
   return `Person ${personId} · ${count} photo${count === 1 ? "" : "s"}`;
+}
+
+// A cluster this project has too little confidence in to treat as a real,
+// distinct person: either the evidence is thin (a single photo, never
+// matched again) or the representative detection itself scored low.
+function isUnsorted(info) {
+  if (info.entries.length === 1) return true;
+  const score = info.entries[0].score;
+  return typeof score === "number" && score < LOW_SCORE_THRESHOLD;
 }
 
 // Zooms the thumbnail toward the specific face this tile represents, using
@@ -56,16 +74,16 @@ function applyFaceCrop(img, bbox) {
   img.style.transform = `scale(${zoom})`;
 }
 
-function renderBreadcrumb(personId) {
+function renderBreadcrumb(label) {
   breadcrumbEl.innerHTML = "";
   const home = document.createElement("button");
   home.type = "button";
   home.className = "crumb";
   home.textContent = "All people";
-  home.disabled = !personId;
+  home.disabled = !label;
   home.addEventListener("click", renderPeopleGrid);
   breadcrumbEl.appendChild(home);
-  if (!personId) return;
+  if (!label) return;
 
   const sep = document.createElement("span");
   sep.className = "crumb-sep";
@@ -73,7 +91,7 @@ function renderBreadcrumb(personId) {
   const current = document.createElement("button");
   current.type = "button";
   current.className = "crumb";
-  current.textContent = `Person ${personId}`;
+  current.textContent = label;
   current.disabled = true;
   breadcrumbEl.append(sep, current);
 }
@@ -95,6 +113,28 @@ function renderPersonTile(personId, info) {
   getDownloadURL(ref(storage, cover.item.thumbnail_key))
     .then((url) => { img.src = url; })
     .catch((err) => { tile.classList.add("broken"); console.error(personId, err); });
+
+  gridEl.appendChild(tile);
+}
+
+// Same shape as a person tile, but a plain (no face-crop) preview and a
+// dashed border -- this isn't one person, it's a catch-all, and shouldn't
+// look like an ordinary result at a glance.
+function renderUnsortedTile() {
+  const tile = document.createElement("div");
+  tile.className = "card person-card unsorted";
+  const img = document.createElement("img");
+  img.alt = "Unsorted";
+  img.loading = "lazy";
+  const label = document.createElement("div");
+  label.className = "person-label";
+  label.textContent = `Unsorted · ${unsorted.length} photo${unsorted.length === 1 ? "" : "s"}`;
+  tile.append(img, label);
+  tile.addEventListener("click", openUnsorted);
+
+  getDownloadURL(ref(storage, unsorted[0].item.thumbnail_key))
+    .then((url) => { img.src = url; })
+    .catch((err) => { tile.classList.add("broken"); console.error("unsorted", err); });
 
   gridEl.appendChild(tile);
 }
@@ -123,18 +163,21 @@ function renderPeopleGrid() {
   renderBreadcrumb(null);
   gridEl.innerHTML = "";
   gridEl.className = "grid people-grid";
-  statusEl.textContent = people.size
-    ? `${people.size} ${people.size === 1 ? "person" : "people"} detected.`
+  const total = people.size + (unsorted.length ? 1 : 0);
+  statusEl.textContent = total
+    ? `${people.size} ${people.size === 1 ? "person" : "people"} detected`
+      + (unsorted.length ? `, ${unsorted.length} photo(s) unsorted.` : ".")
     : "No faces detected yet — publish with FACES_LIVE=1 to find some.";
   // Most-photographed first — the people actually worth looking at tend to
   // be the ones with the most photos, not whatever order Firestore returned.
   const sorted = [...people.entries()].sort((a, b) => b[1].entries.length - a[1].entries.length);
   for (const [personId, info] of sorted) renderPersonTile(personId, info);
+  if (unsorted.length) renderUnsortedTile();
 }
 
 function openPerson(personId) {
   const info = people.get(personId);
-  renderBreadcrumb(personId);
+  renderBreadcrumb(`Person ${personId}`);
   gridEl.innerHTML = "";
   gridEl.className = "grid";
   statusEl.textContent = personLabel(personId, info.entries.length);
@@ -144,28 +187,46 @@ function openPerson(personId) {
   info.entries.forEach((entry, i) => renderPhotoCard(entry, i, rawItems));
 }
 
+function openUnsorted() {
+  renderBreadcrumb("Unsorted");
+  gridEl.innerHTML = "";
+  gridEl.className = "grid";
+  statusEl.textContent = `${unsorted.length} unsorted photo${unsorted.length === 1 ? "" : "s"} `
+    + "— a single appearance, or a low-confidence detection (possibly not a face at all).";
+  const rawItems = unsorted.map((e) => e.item);
+  unsorted.forEach((entry, i) => renderPhotoCard(entry, i, rawItems));
+}
+
 async function load() {
   statusEl.textContent = "Loading…";
   try {
     const snap = await getDocs(query(
       collection(db, "items"), orderBy("mtime", "desc"), limit(SCAN_LIMIT),
     ));
-    people = new Map();
+    const grouped = new Map();
     for (const doc of snap.docs) {
       const item = doc.data();
-      // Prefer `faces` (person_id + this face's own bbox, see
+      // Prefer `faces` (person_id + this face's own bbox/score, see
       // maintenance.py's PublishAction) -- falls back to the older
       // `person_ids`-only shape for anything published before that field
       // existed, so those items keep showing up here, just without a
-      // face-aware crop until republished.
+      // face-aware crop or a confidence score until republished.
       const faceList = item.faces && item.faces.length
         ? item.faces
-        : (item.person_ids || []).map((personId) => ({ person_id: personId, bbox: null }));
+        : (item.person_ids || []).map((personId) => ({ person_id: personId, bbox: null, score: null }));
       for (const face of faceList) {
-        if (!people.has(face.person_id)) people.set(face.person_id, { entries: [] });
-        people.get(face.person_id).entries.push({ item, bbox: face.bbox });
+        if (!grouped.has(face.person_id)) grouped.set(face.person_id, { entries: [] });
+        grouped.get(face.person_id).entries.push({ item, bbox: face.bbox, score: face.score });
       }
     }
+
+    people = new Map();
+    unsorted = [];
+    for (const [personId, info] of grouped) {
+      if (isUnsorted(info)) unsorted.push(...info.entries);
+      else people.set(personId, info);
+    }
+
     renderPeopleGrid();
   } catch (err) {
     statusEl.textContent = `Failed to load: ${err.message}`;

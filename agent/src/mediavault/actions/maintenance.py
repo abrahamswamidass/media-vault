@@ -299,7 +299,8 @@ class PublishAction(Action):
                     str(f["person_id"]) for f in existing if f["person_id"] is not None})
                 face_entries = [
                     {"person_id": str(f["person_id"]),
-                     "bbox": _norm_bbox(f["bbox_x1"], f["bbox_y1"], f["bbox_x2"], f["bbox_y2"])}
+                     "bbox": _norm_bbox(f["bbox_x1"], f["bbox_y1"], f["bbox_x2"], f["bbox_y2"]),
+                     "score": f["score"]}
                     for f in existing if f["person_id"] is not None
                 ]
                 need_faces = not existing and os.getenv("FACES_LIVE", "0") == "1" and is_image
@@ -336,7 +337,8 @@ class PublishAction(Action):
                                 face["embedding"], person_id)
                             person_ids.append(str(person_id))
                             face_entries.append({"person_id": str(person_id),
-                                                 "bbox": _norm_bbox(*face["bbox"])})
+                                                 "bbox": _norm_bbox(*face["bbox"]),
+                                                 "score": face["score"]})
                     except Exception:
                         person_ids = []
                         face_entries = []

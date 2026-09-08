@@ -518,6 +518,26 @@ def test_faces_field_carries_a_bbox_normalized_to_image_dimensions(
     assert entry["person_id"] == "1"
     assert entry["person_id"] == fact["person_ids"][0]
     assert entry["bbox"] == pytest.approx([0.1, 0.1, 0.3, 0.3])
+    assert entry["score"] == pytest.approx(0.9)
+
+
+def test_faces_field_carries_the_detector_score_from_a_fresh_detection(
+        nas, catalog, blobs, facts, fake_insightface, monkeypatch):
+    """The web uses this to distinguish a real face from a likely false
+    positive (a pattern/texture the model mistook for one) -- must be
+    published from a live detection, not just the already-detected path
+    the test above covers."""
+    import json
+    import numpy as np
+    monkeypatch.setenv("FACES_LIVE", "1")
+    fake_insightface["faces"] = [_FakeDetectedFace(
+        (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.42)]
+    conn = _indexed(nas, catalog)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    fact = json.loads((facts.root / "nas__Photos_real.jpg.json").read_text())
+    assert fact["faces"][0]["score"] == pytest.approx(0.42)
 
 
 def test_faces_field_bbox_is_null_without_known_image_dimensions(
@@ -533,7 +553,7 @@ def test_faces_field_bbox_is_null_without_known_image_dimensions(
     PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
 
     fact = json.loads((facts.root / "nas__Photos_real.jpg.json").read_text())
-    assert fact["faces"] == [{"person_id": "1", "bbox": None}]
+    assert fact["faces"] == [{"person_id": "1", "bbox": None, "score": pytest.approx(0.9)}]
 
 
 def test_faces_field_is_never_missing_the_embedding_only_the_bbox(

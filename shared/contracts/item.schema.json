@@ -101,6 +101,10 @@
             "items": { "type": "number", "minimum": 0, "maximum": 1 },
             "minItems": 4, "maxItems": 4,
             "description": "[x1, y1, x2, y2], each a 0-1 fraction of the full original image's own width/height -- not pixel coordinates, and not relative to `thumb` specifically, since that's a differently-sized derivative. Lets the web crop a person's representative thumbnail to their actual face via CSS, without needing a new cropped image asset. null if the image's dimensions weren't known at publish time (rare -- EXIF missing them)."
+          },
+          "score": {
+            "type": ["number", "null"],
+            "description": "The face detector's own confidence (insightface's det_score, typically 0-1) that this detection is really a face. A low score is the usual sign of a false positive -- a pattern or texture the model mistook for one -- so the web treats a low-confidence bbox as untrustworthy for cropping rather than zooming into whatever it guessed."
           }
         }
       },
