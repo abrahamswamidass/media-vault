@@ -39,6 +39,7 @@ what each command actually touches.
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 | `people-reset --commit` | Wipe all detected faces/people to redo clustering — leaves items, scans, and published facts untouched. |
+| `people-recluster [--threshold N] --commit` | Re-cluster existing faces from their already-computed embeddings — no re-detection, seconds not hours. See below. |
 | `publish nas --debug` (with `FACES_LIVE=1`) | Print each detected face's actual nearest-person distance and match/no-match outcome — for seeing why clustering did or didn't group two photos together. |
 
 Indexing a terabyte takes a while and checkpoints after every directory. If it
@@ -528,16 +529,46 @@ Items keep their `published_at`, quick_hash, and EXIF — only face detection
 re-runs on the next `--force` publish.
 
 **If clustering still looks wrong afterward** — the same person split across
-many "new" people instead of grouping together — add `--debug` to see the
-actual numbers behind each decision, rather than guessing:
+several "new" people instead of grouping together — add `--debug` to see the
+actual numbers behind a live detection run, rather than guessing:
 ```powershell
 docker exec -e FACES_LIVE=1 media-vault-container python -m mediavault.cli publish nas --force --max-items 20 --commit --debug
 ```
 Prints each face's nearest existing person and the real distance to them,
-against `catalog/people.py`'s `MATCH_THRESHOLD` (0.9) — if genuinely
-same-person photos consistently land just above that line, the threshold
-itself may need loosening for your library, which is a one-line change to
-justify with real numbers rather than a guess.
+against `catalog/people.py`'s `MATCH_THRESHOLD` (0.9).
+
+**A person splitting across multiple clusters is often not a threshold
+problem, though** — `assign_person()` (what a live `publish` run uses) only
+ever compares a new face against each person's *first-ever* detected face,
+never updated after that. One unrepresentative first photo (bad angle, poor
+lighting) can permanently anchor a person to a reference point that later,
+genuinely-matching photos don't land close enough to — even though those
+later photos would clearly match *each other*. `people-recluster` fixes this
+directly: it re-clusters every already-detected face from scratch, comparing
+a face against *any* existing member of a cluster instead of just the first.
+No re-detection needed — it only compares embeddings already sitting in the
+local catalog, so this takes seconds even for thousands of faces, not the
+hours a live `publish --force` re-run would cost:
+```powershell
+docker exec media-vault-container python -m mediavault.cli people-recluster          # preview
+docker exec media-vault-container python -m mediavault.cli people-recluster --commit # apply
+```
+Applying it rewrites every face's `person_id` and rebuilds the local `people`
+table — **existing names are lost**, same trade-off `people-reset` already
+makes; re-run `people-rename` afterward for anyone renamed before. Detections,
+embeddings, and bounding boxes themselves are untouched, only which person
+each face is assigned to. Since this only changes the *local* catalog, the
+already-published `person_ids`/`faces` fields in Firestore go stale until you
+republish:
+```powershell
+docker exec media-vault-container python -m mediavault.cli publish nas --force --commit
+```
+`--threshold` overrides `MATCH_THRESHOLD` (0.9) for a single run, without
+editing code — useful for experimenting: try a slightly higher value first
+(more lenient matching), re-run with `--commit` once it looks right. A value
+too high risks the opposite problem — two different people merging into one
+cluster — so treat this as a real number to justify by checking the result,
+not just cranking upward until fragmentation stops.
 
 **What's stored where** — deliberately split, for privacy as much as
 architecture:

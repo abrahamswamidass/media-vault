@@ -105,7 +105,10 @@ function renderPhotoCard(entry, index, personItems) {
   card.appendChild(img);
   card.addEventListener("click", () => openPhotoAt(personItems, index));
 
-  applyFaceCrop(img, entry.bbox);
+  // No face crop here, deliberately -- unlike the "All people" cover tile,
+  // you already know whose gallery this is once you've clicked in; zooming
+  // every photo to just their face would throw away the actual photo
+  // (the scene, who else is in it) for no benefit.
   getDownloadURL(ref(storage, entry.item.thumbnail_key))
     .then((url) => { img.src = url; })
     .catch((err) => { card.classList.add("broken"); console.error(entry.item.item_id, err); });

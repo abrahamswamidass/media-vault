@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .catalog import Catalog, dedup as dedup_mod, scanner
+from .catalog.people import MATCH_THRESHOLD, recluster
 from .actions.amazon import StageForAmazonAction
 from .actions.coldstorage import ColdArchiveAction
 from .actions.dedup import ArchiveDuplicatesAction
@@ -549,6 +550,50 @@ def cmd_people_reset(args) -> int:
               f"{result['people_deleted']:,} person cluster(s).")
         print("Nothing else changed — items, scans, and published facts are untouched. "
               "Re-run publish with --force and FACES_LIVE=1 to re-detect.")
+        return 0
+
+
+def cmd_people_recluster(args) -> int:
+    with _catalog(args) as catalog:
+        n_faces = catalog.conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
+        if n_faces == 0:
+            print("No detected faces to recluster.")
+            return 0
+        before = catalog.conn.execute("SELECT COUNT(*) FROM people").fetchone()[0]
+
+        def progress(done, total):
+            if args.debug:
+                print(f"  {done}/{total}", flush=True)
+
+        result = recluster(catalog, threshold=args.threshold,
+                           on_progress=progress if args.debug else None)
+
+        if args.json:
+            _emit({"faces": result["face_count"], "clusters_proposed": result["cluster_count"],
+                  "people_now": before, "threshold": args.threshold, "committed": False}, True)
+            if not args.commit:
+                return 0
+        elif not args.commit:
+            print(f"{result['face_count']:,} face(s) -> {result['cluster_count']:,} cluster(s) "
+                  f"at threshold {args.threshold} (currently {before:,} people).")
+            _banner(False)
+            print("Any names on current people are lost when applied — re-run "
+                  "people-rename afterward. Then republish (--force) to push the "
+                  "corrected person_ids/faces to Firestore.")
+            return 0
+
+        created = catalog.apply_recluster(result["assignments"])
+        if args.json:
+            _emit({"faces": result["face_count"], "people_created": created,
+                  "people_before": before, "threshold": args.threshold, "committed": True}, True)
+            return 0
+
+        _banner(True)
+        print(f"Recreated {created:,} people from {result['face_count']:,} face(s) "
+              f"(was {before:,} people).")
+        print("Next: docker exec media-vault-container python -m mediavault.cli "
+              "publish nas --force --commit  — pushes the corrected person_ids/"
+              "faces to Firestore. Then re-name people that need it.")
         return 0
 
 
@@ -1108,6 +1153,30 @@ def build_parser() -> argparse.ArgumentParser:
     prs.add_argument("--commit", action="store_true",
                      help="ACTUALLY delete (default: preview only)")
     prs.set_defaults(_fn=cmd_people_reset)
+
+    prc = sub.add_parser(
+        "people-recluster",
+        help="re-cluster detected faces from their already-computed embeddings "
+             "(no re-detection — seconds, not hours)",
+        description="Re-clusters every stored face from scratch, matching against "
+                    "any existing member of a cluster instead of just its first-ever "
+                    "face (see catalog/people.py's recluster()) — fixes one bad first "
+                    "photo silently anchoring a person's whole cluster. Reassigns "
+                    "person_id on every face and rebuilds the people table (names are "
+                    "lost, re-run people-rename after); detections/embeddings/bboxes "
+                    "are untouched. Republish --force afterward to push corrected "
+                    "person_ids/faces to Firestore.")
+    prc.add_argument("--db", help="catalog database path")
+    prc.add_argument("--threshold", type=float, default=MATCH_THRESHOLD,
+                     help=f"max embedding distance to treat two faces as the same "
+                          f"person (default {MATCH_THRESHOLD}, catalog/people.py's "
+                          f"MATCH_THRESHOLD) — try a slightly higher value if the "
+                          f"same person keeps splitting into multiple clusters")
+    prc.add_argument("--debug", action="store_true",
+                     help="show progress while comparing faces")
+    prc.add_argument("--commit", action="store_true",
+                     help="ACTUALLY apply the new clustering (default: preview only)")
+    prc.set_defaults(_fn=cmd_people_recluster)
 
     # -- reset --
     rs = sub.add_parser(

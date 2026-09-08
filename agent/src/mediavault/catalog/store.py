@@ -272,6 +272,15 @@ class Catalog:
             (source, item_id),
         ).fetchall()
 
+    def all_faces_with_embeddings(self) -> list[sqlite3.Row]:
+        """Every detected face, oldest-detected first — the fixed order
+        catalog/people.py's recluster() processes them in, so re-running
+        it at the same threshold always proposes the same clusters."""
+        return self.conn.execute(
+            "SELECT id, source, item_id, person_id, embedding FROM faces "
+            "ORDER BY detected_at, id"
+        ).fetchall()
+
     def list_people(self) -> list[sqlite3.Row]:
         """Every person, with how many faces/distinct items they appear in
         and one sample item to look at (their first-ever detected face) —
@@ -415,6 +424,28 @@ class Catalog:
             faces = c.execute("DELETE FROM faces").rowcount
             people = c.execute("DELETE FROM people").rowcount
         return {"faces_deleted": faces, "people_deleted": people}
+
+    def apply_recluster(self, assignments: dict[int, int]) -> int:
+        """Applies a catalog/people.py recluster() proposal: rebuilds the
+        `people` table from scratch (one fresh, unnamed row per resulting
+        cluster — same name-loss trade-off reset_people already makes,
+        re-name via people-rename afterward) and reassigns every face's
+        person_id to match. Detections/embeddings/bboxes themselves are
+        untouched — only which person each face belongs to changes.
+        Returns the number of people created.
+        """
+        with self.transaction() as c:
+            c.execute("DELETE FROM people")
+            c.execute("UPDATE faces SET person_id = NULL")
+            cluster_to_person: dict[int, int] = {}
+            for face_id, cluster_idx in assignments.items():
+                if cluster_idx not in cluster_to_person:
+                    cur = c.execute(
+                        "INSERT INTO people (name, created_at) VALUES (NULL, ?)", (_now(),))
+                    cluster_to_person[cluster_idx] = cur.lastrowid
+                c.execute("UPDATE faces SET person_id = ? WHERE id = ?",
+                         (cluster_to_person[cluster_idx], face_id))
+        return len(cluster_to_person)
 
     # --- reading ---------------------------------------------------------- #
     def get(self, source: str, item_id: str) -> Optional[sqlite3.Row]:

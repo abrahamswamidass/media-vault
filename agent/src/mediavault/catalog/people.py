@@ -40,6 +40,56 @@ def _distance(a: list[float], b: list[float]) -> float:
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
 
 
+def recluster(catalog: Catalog, *, threshold: float = MATCH_THRESHOLD,
+              on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
+    """Re-cluster every stored face from scratch, matching a face against
+    ANY existing member of a cluster it's being compared to -- not just
+    that cluster's first-ever face, the way the online assign_person()
+    above works. Fixes the failure mode that design leaves open: one
+    unrepresentative first photo (bad angle, poor lighting) anchoring a
+    person's centroid, silently rejecting every genuine later match
+    against it even though they'd clearly match each other.
+
+    Needs no re-detection -- only compares embeddings already sitting in
+    the local `faces` table, so this is seconds even for thousands of
+    faces, not the hours a `publish --force` re-run would cost. Purely
+    advisory: returns the proposed assignment, doesn't touch the catalog
+    itself (see Catalog.apply_recluster for that, gated behind --commit
+    the same way every mutating command in this project is).
+
+    Deterministic: faces are processed oldest-detected first (same order
+    Catalog.all_faces_with_embeddings returns), so re-running at the same
+    threshold always proposes the same clusters -- same reasoning as
+    dedup's keeper selection being order-independent-but-reproducible.
+
+    `on_progress(done, total)`, if given, fires after each face -- this is
+    O(faces^2) (every face compared against every prior one), which is
+    still fast at a personal-library scale (thousands, not millions) but
+    isn't instant, so `people-recluster --debug` has something to show.
+    """
+    faces = catalog.all_faces_with_embeddings()
+    cluster_vecs: list[list[list[float]]] = []
+    assignments: dict[int, int] = {}
+    for i, face in enumerate(faces):
+        vec = _unpack(face["embedding"])
+        best_idx, best_dist = None, None
+        for idx, members in enumerate(cluster_vecs):
+            for m in members:
+                dist = _distance(vec, m)
+                if best_dist is None or dist < best_dist:
+                    best_idx, best_dist = idx, dist
+        if best_dist is not None and best_dist <= threshold:
+            cluster_vecs[best_idx].append(vec)
+            assignments[face["id"]] = best_idx
+        else:
+            cluster_vecs.append([vec])
+            assignments[face["id"]] = len(cluster_vecs) - 1
+        if on_progress:
+            on_progress(i + 1, len(faces))
+    return {"face_count": len(faces), "cluster_count": len(cluster_vecs),
+            "assignments": assignments}
+
+
 def assign_person(catalog: Catalog, embedding: bytes,
                   on_match: Optional[Callable[[Optional[int], Optional[float], bool], None]] = None
                   ) -> int:
