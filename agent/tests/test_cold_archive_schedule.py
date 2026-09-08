@@ -44,7 +44,8 @@ def args(tmp_path, monkeypatch):
     nas = tmp_path / "nas"
     _write(nas, "img.jpg", b"pretend-jpeg" * 100)
     return argparse.Namespace(root=str(nas), trash=None, permanent=False,
-                              coldstore_dir=str(tmp_path / "coldstore"))
+                              coldstore_dir=str(tmp_path / "coldstore"),
+                              log_dir=str(tmp_path / "actions"))
 
 
 # --------------------------------------------------------------------------- #

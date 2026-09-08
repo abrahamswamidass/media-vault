@@ -712,7 +712,8 @@ def _maybe_run_scheduled_cold_archive(args, catalog) -> None:
         connector = _connector_for(source, args)
         coldstore = _coldstore_for(args)
         rows = catalog.not_cold_archived(source)
-        summary = _run_cold_archive(rows, connector, coldstore, catalog, commit=True)
+        summary = _run_cold_archive(rows, connector, coldstore, catalog, commit=True,
+                                    log_dir=getattr(args, "log_dir", None))
         detail = (f"pushed {summary['pushed']} file(s), {_human(summary['pushed_bytes'])} "
                   f"({summary['noop']} already there, {summary['failed']} failed)")
         print(f"  cold-archive: {detail}")
