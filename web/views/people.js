@@ -16,6 +16,7 @@ import {
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
 import { openPhotoAt } from "../photoModal.js";
+import { loadHiddenPrefixes, isHidden } from "../hiddenFolders.js";
 
 const SCAN_LIMIT = 5000;
 
@@ -233,9 +234,11 @@ async function load() {
     const snap = await getDocs(query(
       collection(db, "items"), orderBy("mtime", "desc"), limit(SCAN_LIMIT),
     ));
+    const hiddenPrefixes = await loadHiddenPrefixes();
     const grouped = new Map();
     for (const doc of snap.docs) {
       const item = doc.data();
+      if (isHidden(item.item_id, hiddenPrefixes)) continue;
       // Prefer `faces` (person_id + this face's own bbox/score, see
       // maintenance.py's PublishAction) -- falls back to the older
       // `person_ids`-only shape for anything published before that field

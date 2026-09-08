@@ -73,8 +73,9 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  tile) — a pure display preference written straight to
                  Firestore's hidden_folders/ collection from the browser
                  (hiddenFolders.js), no intent needed since nothing on the
-                 NAS is touched; Browse and Map both filter it out, Folders
-                 itself never does since it's the only place to unhide. The
+                 NAS is touched; Browse, Map, and People all filter it out,
+                 Folders itself never does since it's the only place to
+                 unhide. The
                  photo modal (photoModal.js) is a
                  body-level singleton shared by Browse and Folders rather
                  than duplicated per view — app.js's router force-closes it
