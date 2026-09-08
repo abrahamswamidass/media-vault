@@ -11,7 +11,7 @@ what each command actually touches.
 | Command | What it does |
 |---|---|
 | `doctor` | Preflight check — what's configured, what isn't. |
-| `index nas` | Resumable walk into the catalog. Add `--debug` for live per-file/per-directory progress. Can also run itself weekly — see [Scheduled maintenance](#scheduled-maintenance-index--cold-archive). |
+| `index nas` | Resumable walk into the catalog. Add `--debug` for live per-file/per-directory progress. Can also run itself weekly — see [Scheduled maintenance](#scheduled-maintenance-index--publish--cold-archive). |
 | `stats` | Summary of what's in the catalog. |
 | `dedup nas` | Preview duplicate groups. |
 | `dedup nas --commit` | Archive every duplicate found (see [Deduplication](#deduplication) for `--max-groups` to do this in batches). |
@@ -35,7 +35,7 @@ what each command actually touches.
 | `stats` | Already covers Drive once indexed — one command, all sources together, no `drive`-specific variant needed. |
 | `process-intents` | Preview what the web module has requested — read-only, claims/runs nothing. |
 | `process-intents --commit` | Claim and run pending requests from the web module (e.g. "stage this for Amazon"), writing status/result back. One pass. See [web.md](web.md#staging-a-photo-for-amazon). |
-| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds. This is the container's own default command (see [setup.md](setup.md)) — you don't normally need to run it yourself. If you do run it manually, use `docker exec -it` so Ctrl+C actually stops it. Also checks each cycle whether a weekly `index` and/or `cold-archive` run is due, if `INDEX_SCHEDULE=1` / `COLD_ARCHIVE_SCHEDULE=1` — see [Scheduled maintenance](#scheduled-maintenance-index--cold-archive) and [Cold storage](#cold-storage). |
+| `process-intents --watch --interval 600` | Same, but loops forever polling every `interval` seconds. This is the container's own default command (see [setup.md](setup.md)) — you don't normally need to run it yourself. If you do run it manually, use `docker exec -it` so Ctrl+C actually stops it. Also checks each cycle whether a weekly `index`, `publish`, and/or `cold-archive` run is due, if `INDEX_SCHEDULE=1` / `PUBLISH_SCHEDULE=1` / `COLD_ARCHIVE_SCHEDULE=1` — see [Scheduled maintenance](#scheduled-maintenance-index--publish--cold-archive) and [Cold storage](#cold-storage). |
 | `people` | List detected face clusters (local catalog only). Needs `FACES_LIVE=1` during publish to have found anything. See [Face detection](#face-detection-optional-agent-side-only-for-now). |
 | `people-rename <id> "Name"` | Name a person — local catalog only, no Firestore yet. |
 | `people-reset --commit` | Wipe all detected faces/people to redo clustering — leaves items, scans, and published facts untouched. |
@@ -343,7 +343,7 @@ entire library over a home connection:
 docker exec media-vault-container python -m mediavault.cli cold-archive nas --max-items 20 --commit
 ```
 
-**Running it automatically**: see [Scheduled maintenance](#scheduled-maintenance-index--cold-archive)
+**Running it automatically**: see [Scheduled maintenance](#scheduled-maintenance-index--publish--cold-archive)
 below — `COLD_ARCHIVE_SCHEDULE=1` gets you a weekly run with no manual
 command needed.
 
@@ -353,12 +353,12 @@ minimum retention (deleting or moving a file out early is billed as if it
 had stayed). This is for data you're confident you won't need again soon,
 not overflow you'll dip into.
 
-### Scheduled maintenance (index / cold-archive)
+### Scheduled maintenance (index / publish / cold-archive)
 
-Two commands can run themselves on a weekly schedule from inside
+Three commands can run themselves on a weekly schedule from inside
 `process-intents --watch` (the container's default command) instead of
-needing a manual `docker exec` every time — indexing and cold-archive.
-Both are opt-in and both share the same mechanism:
+needing a manual `docker exec` every time — indexing, publishing, and
+cold-archive. All three are opt-in and all share the same mechanism:
 
 - The watch loop checks, once per poll cycle, whether it's been long enough
   since a named task last ran. The "last ran" timestamp lives in the
@@ -371,14 +371,25 @@ Both are opt-in and both share the same mechanism:
   `COLD_STORAGE_BUCKET` set) is skipped with a clear message every cycle
   rather than crashing the loop or going silent.
 - Running the equivalent manual command at any time doesn't conflict with
-  this — both paths share the same idempotent logic (index's own
-  resume-from-checkpoint, cold-archive's exists-check-before-upload), so
-  an overlap just means a little redundant, harmless work.
+  this — every scheduled path shares the same idempotent/incremental logic
+  its manual counterpart uses (index's resume-from-checkpoint, publish's
+  unpublished-only selection, cold-archive's exists-check-before-upload),
+  so an overlap just means a little redundant, harmless work.
 
 **Index**, opt in with `INDEX_SCHEDULE=1`:
 - `INDEX_SCHEDULE=1` — required, off by default.
 - `INDEX_INTERVAL_DAYS` — default `7`.
 - `INDEX_SOURCE` — default `nas`.
+
+**Publish**, opt in with `PUBLISH_SCHEDULE=1`. Deliberately never uses
+`--force` — that's for deliberate backfill/correction passes (e.g. after
+`people-recluster`, to push corrected `person_ids`), not something to
+re-pay for every already-published item on a weekly timer. Only ever picks
+up genuinely new items since last time, same as a plain manual `publish`.
+Respects `FACES_LIVE` the same way a manual run does:
+- `PUBLISH_SCHEDULE=1` — required, off by default.
+- `PUBLISH_INTERVAL_DAYS` — default `7`.
+- `PUBLISH_SOURCE` — default `nas`.
 
 **Cold-archive**, opt in with `COLD_ARCHIVE_SCHEDULE=1` (needs
 `COLD_STORAGE_BUCKET` configured — see [Cold storage](#cold-storage) above):
@@ -386,9 +397,10 @@ Both are opt-in and both share the same mechanism:
 - `COLD_ARCHIVE_INTERVAL_DAYS` — default `7`.
 - `COLD_ARCHIVE_SOURCE` — default `nas`.
 
-Within one poll cycle, a due index run happens before a due cold-archive
-run — so if both are due at once, cold-archive sees that cycle's freshly
-indexed content instead of waiting for the next one.
+Within one poll cycle, a due index run happens before a due publish run,
+which happens before a due cold-archive run — so if more than one is due
+at once, each downstream step sees that same cycle's freshly updated
+content instead of waiting for the next one.
 
 ### Amazon
 

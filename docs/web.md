@@ -124,12 +124,12 @@ The **Amazon** tab is read-only — it lists what's been requested and its
 current status (waiting / working / staged / failed), not a picker of its
 own.
 
-**Three bare dots in the page header** — intents, index, cold-archive — each
-a quick green/red/gray LED with no visible text of its own. The actual
-detail (last-run time, what happened) only shows on hover on desktop (the
-native browser tooltip) or tap on touch devices (a small bubble under the
-dot, since `title` has no real tap equivalent on a phone) — deliberately
-kept out of the header itself.
+**Four bare dots in the page header, arranged 2x2** — intents, index,
+publish, cold-archive — each a quick green/red/gray LED with no visible
+text of its own. The actual detail (last-run time, what happened) only
+shows on hover on desktop (the native browser tooltip) or tap on touch
+devices (a small bubble under the dot, since `title` has no real tap
+equivalent on a phone) — deliberately kept out of the header itself.
 
 - **Intents** shows whether the watch loop is actually running right now —
   useful because the container's default command *can* be overridden (see
@@ -139,14 +139,16 @@ kept out of the header itself.
   minutes old or missing entirely — meaning any request, of any type, would
   just sit pending until the container (or a manual `process-intents
   --commit`) picks it up.
-- **Index** and **Cold-archive** reflect the optional weekly schedules (see
-  [agent.md's Scheduled maintenance](agent.md#scheduled-maintenance-index--cold-archive)):
-  gray if that schedule was never turned on (`INDEX_SCHEDULE`/
-  `COLD_ARCHIVE_SCHEDULE`), green if its last run was within 1.5× its
-  configured interval, red if it's overdue. Hover or tap either for exactly
-  when it last ran and a one-line summary of what happened (files
-  indexed, files pushed, errors) — the same detail the container's own
-  logs would show, without needing to go find them.
+- **Index**, **Publish**, and **Cold-archive** reflect their optional
+  weekly schedules (see
+  [agent.md's Scheduled maintenance](agent.md#scheduled-maintenance-index--publish--cold-archive)):
+  gray if that schedule was never turned on (`INDEX_SCHEDULE` /
+  `PUBLISH_SCHEDULE` / `COLD_ARCHIVE_SCHEDULE`), green if its last run was
+  within 1.5× its configured interval, red if it's overdue. Hover or tap
+  any of them for exactly when it last ran and a one-line summary of what
+  happened (files indexed, items published, files pushed, errors) — the
+  same detail the container's own logs would show, without needing to go
+  find them.
 
 **If you ever do need to run it by hand** — the container was started with
 `sleep infinity` instead, or you're troubleshooting — use `docker exec -it`,

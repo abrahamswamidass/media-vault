@@ -1,7 +1,7 @@
 """
 Periodic background tasks inside `process-intents --watch`: the weekly
-cold-archive push and the weekly re-index, both opt-in and both built on
-the same generic `schedules` table mechanism.
+index, publish, and cold-archive runs, all opt-in and all built on the
+same generic `schedules` table mechanism.
 
 Verifies schedule state survives via the catalog (not an in-memory timer
 -- see _schedule_due's callers for why that matters given how often this
@@ -20,6 +20,7 @@ from mediavault.catalog import scanner
 from mediavault.cli import (
     _maybe_run_scheduled_cold_archive,
     _maybe_run_scheduled_index,
+    _maybe_run_scheduled_publish,
     _schedule_status_for_heartbeat,
 )
 from mediavault.connectors.nas import NASConnector
@@ -45,7 +46,9 @@ def args(tmp_path, monkeypatch):
     _write(nas, "img.jpg", b"pretend-jpeg" * 100)
     return argparse.Namespace(root=str(nas), trash=None, permanent=False,
                               coldstore_dir=str(tmp_path / "coldstore"),
-                              log_dir=str(tmp_path / "actions"))
+                              log_dir=str(tmp_path / "actions"),
+                              blob_dir=str(tmp_path / "blobs"),
+                              facts_dir=str(tmp_path / "facts"))
 
 
 # --------------------------------------------------------------------------- #
@@ -188,6 +191,77 @@ def test_index_resumes_an_interrupted_scan_instead_of_restarting(args, catalog, 
     assert state["complete"] == 1
 
 
+# --------------------------------------------------------------------------- #
+# publish schedule
+#
+# Checks the scheduling wrapper's own behavior (gating, force=False) --
+# PublishAction's own content-level behavior (thumbnails, EXIF, faces) is
+# already covered in test_publish.py. run() always returns cleanly even if
+# an item's thumbnail step fails (e.g. img.jpg here is fake bytes, not a
+# real decodable image), so these don't need Pillow.
+# --------------------------------------------------------------------------- #
+def test_publish_disabled_by_default_does_nothing(args, catalog, monkeypatch, capsys):
+    monkeypatch.delenv("PUBLISH_SCHEDULE", raising=False)
+
+    _maybe_run_scheduled_publish(args, catalog)
+
+    assert catalog.get_last_scheduled_run("publish_nas") is None
+    assert capsys.readouterr().out == ""
+
+
+def test_publish_runs_on_first_call_and_marks_the_schedule(args, catalog, monkeypatch):
+    monkeypatch.setenv("PUBLISH_SCHEDULE", "1")
+    scanner.scan(NASConnector(args.root), catalog, source="nas")
+
+    _maybe_run_scheduled_publish(args, catalog)
+
+    assert catalog.get_last_scheduled_run("publish_nas") is not None
+
+
+def test_publish_skips_when_run_recently(args, catalog, monkeypatch):
+    monkeypatch.setenv("PUBLISH_SCHEDULE", "1")
+    scanner.scan(NASConnector(args.root), catalog, source="nas")
+    catalog.mark_scheduled_run("publish_nas")
+    first_run = catalog.get_last_scheduled_run("publish_nas")
+
+    _maybe_run_scheduled_publish(args, catalog)
+
+    assert catalog.get_last_scheduled_run("publish_nas") == first_run, \
+        "ran again despite being inside the interval"
+
+
+def test_publish_runs_again_once_the_interval_has_passed(args, catalog, monkeypatch):
+    monkeypatch.setenv("PUBLISH_SCHEDULE", "1")
+    monkeypatch.setenv("PUBLISH_INTERVAL_DAYS", "7")
+    scanner.scan(NASConnector(args.root), catalog, source="nas")
+    eight_days_ago = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    catalog.conn.execute(
+        "INSERT INTO schedules (name, last_run_at) VALUES (?, ?)",
+        ("publish_nas", eight_days_ago))
+    catalog.conn.commit()
+
+    _maybe_run_scheduled_publish(args, catalog)
+
+    assert catalog.get_last_scheduled_run("publish_nas") != eight_days_ago
+
+
+def test_publish_schedule_never_uses_force(args, catalog, monkeypatch):
+    """A scheduled run must only ever touch genuinely new items -- --force
+    is for deliberate backfill passes (e.g. after people-recluster), not
+    routine automation. Verified by pre-marking the only indexed item as
+    already published: if force were used, PublishAction would re-select
+    and re-touch it; since it isn't, there's nothing for it to do."""
+    monkeypatch.setenv("PUBLISH_SCHEDULE", "1")
+    scanner.scan(NASConnector(args.root), catalog, source="nas")
+    catalog.mark_published("nas", "img.jpg")
+
+    _maybe_run_scheduled_publish(args, catalog)
+
+    status = catalog.get_schedule_status("publish_nas")
+    assert status is not None
+    assert "nothing" in status["detail"].lower() or "0 item" in status["detail"]
+
+
 def test_index_records_a_human_readable_detail(args, catalog, monkeypatch):
     monkeypatch.setenv("INDEX_SCHEDULE", "1")
 
@@ -213,12 +287,14 @@ def test_cold_archive_records_a_human_readable_detail(args, catalog, monkeypatch
 # --------------------------------------------------------------------------- #
 def test_heartbeat_status_reports_disabled_schedules(args, catalog, monkeypatch):
     monkeypatch.delenv("INDEX_SCHEDULE", raising=False)
+    monkeypatch.delenv("PUBLISH_SCHEDULE", raising=False)
     monkeypatch.delenv("COLD_ARCHIVE_SCHEDULE", raising=False)
 
     status = _schedule_status_for_heartbeat(catalog)
 
     assert status["index_nas"]["enabled"] is False
     assert status["index_nas"]["last_run_at"] is None
+    assert status["publish_nas"]["enabled"] is False
     assert status["cold_archive_nas"]["enabled"] is False
 
 

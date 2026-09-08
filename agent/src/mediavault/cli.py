@@ -807,15 +807,62 @@ def _maybe_run_scheduled_index(args, catalog) -> None:
         print(f"  index schedule failed: {e}")
 
 
+def _maybe_run_scheduled_publish(args, catalog) -> None:
+    """Runs `publish` on a persisted schedule, opt-in via PUBLISH_SCHEDULE=1.
+    Same shape as the other schedulers -- interval via
+    PUBLISH_INTERVAL_DAYS (default 7), source via PUBLISH_SOURCE (default
+    "nas").
+
+    Deliberately never --force: that backfills/republishes already-
+    published items too (e.g. after a people-recluster, to push corrected
+    person_ids), which is the right shape for a deliberate one-off, not
+    something to re-pay every single item's cost for on a weekly timer.
+    This only ever picks up what's genuinely new since last time --
+    PublishAction.unpublished()'s default behavior. Respects FACES_LIVE
+    the same way a manual publish already does, no special handling here.
+    """
+    if os.getenv("PUBLISH_SCHEDULE", "0") != "1":
+        return
+
+    source = os.getenv("PUBLISH_SOURCE", "nas")
+    schedule_name = f"publish_{source}"
+    interval_days = int(os.getenv("PUBLISH_INTERVAL_DAYS", "7"))
+    if not _schedule_due(catalog, schedule_name, interval_days):
+        return
+
+    print(f"  weekly publish due for '{source}' — running now", flush=True)
+    try:
+        connector = _connector_for(source, args)
+        blobs = _blobs_for(args)
+        facts = _facts_for(args)
+        # PublishAction.run() always returns cleanly (ok/no-op/failed),
+        # never raises -- so everything past this point always reaches
+        # mark_scheduled_run. Only a construction failure above (bad NAS
+        # creds, GCS misconfigured) skips it, the same "keep retrying every
+        # cycle" reasoning as the other schedulers.
+        result = PublishAction(source, connector, catalog, blobs, facts).run(commit=True)
+        detail = result.detail
+        if result.status == "ok":
+            failed = result.outputs.get("failed") or []
+            detail = f"published {result.outputs.get('published', 0)} item(s)"
+            if failed:
+                detail += f", {len(failed)} failed"
+        print(f"  publish: {detail}")
+        catalog.mark_scheduled_run(schedule_name, detail=detail)
+    except Exception as e:
+        print(f"  publish schedule failed: {e}")
+
+
 def _schedule_status_for_heartbeat(catalog) -> dict:
-    """Snapshot of both periodic schedules' configuration + last-run state,
-    for the web header's status indicator. Reports whether each is even
-    enabled (a schedule the user never opted into shouldn't read as
+    """Snapshot of every periodic schedule's configuration + last-run
+    state, for the web header's status indicator. Reports whether each is
+    even enabled (a schedule the user never opted into shouldn't read as
     "broken"), not just its last-run timestamp -- the UI needs both to
     tell "off" apart from "overdue"."""
     out = {}
     for prefix, enabled_var, source_var, interval_var in (
         ("index", "INDEX_SCHEDULE", "INDEX_SOURCE", "INDEX_INTERVAL_DAYS"),
+        ("publish", "PUBLISH_SCHEDULE", "PUBLISH_SOURCE", "PUBLISH_INTERVAL_DAYS"),
         ("cold_archive", "COLD_ARCHIVE_SCHEDULE", "COLD_ARCHIVE_SOURCE", "COLD_ARCHIVE_INTERVAL_DAYS"),
     ):
         enabled = os.getenv(enabled_var, "0") == "1"
@@ -885,6 +932,7 @@ def cmd_process_intents(args) -> int:
                 except Exception as e:
                     print(f"  (heartbeat failed: {e})")
                 _maybe_run_scheduled_index(args, catalog)
+                _maybe_run_scheduled_publish(args, catalog)
                 _maybe_run_scheduled_cold_archive(args, catalog)
                 time.sleep(args.interval)
         except KeyboardInterrupt:

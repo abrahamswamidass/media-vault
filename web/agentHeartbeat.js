@@ -1,6 +1,6 @@
-// Topbar status: is the agent's background loop alive, and are its two
-// periodic maintenance jobs (weekly index, weekly cold-archive) healthy?
-// All three read from the one `agent_status/process_intents` doc the
+// Topbar status: is the agent's background loop alive, and are its three
+// periodic maintenance jobs (weekly index, publish, cold-archive) healthy?
+// All four read from the one `agent_status/process_intents` doc the
 // watch loop already writes every poll -- `schedules` is a bonus field on
 // that same doc (see IntentsStore.heartbeat), not a separate collection.
 // Not scoped to any one view — the watch loop processes every intent type
@@ -8,10 +8,11 @@
 // publish, stage_for_amazon, ...), not just Amazon staging, so this belongs
 // in the shared header rather than the Amazon tab.
 //
-// Deliberately just three bare dots, no always-visible text -- the detail
-// (last-run time, what happened) only shows on hover (desktop, via the
-// native `title` tooltip) or tap (touch, via a small custom bubble, since
-// `title` has no real tap equivalent on a phone).
+// Deliberately just four bare dots (arranged 2x2, see style.css), no
+// always-visible text -- the detail (last-run time, what happened) only
+// shows on hover (desktop, via the native `title` tooltip) or tap (touch,
+// via a small custom bubble, since `title` has no real tap equivalent on
+// a phone).
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase.js";
 
@@ -50,10 +51,15 @@ function scheduleState(entry) {
   return { cls: isLive ? "is-live" : "is-stale" };
 }
 
+const SCHEDULE_ENV_VAR = {
+  Index: "INDEX_SCHEDULE",
+  Publish: "PUBLISH_SCHEDULE",
+  "Cold-archive": "COLD_ARCHIVE_SCHEDULE",
+};
+
 function scheduleTitle(label, entry) {
   if (!entry || !entry.enabled) {
-    const envVar = label === "Index" ? "INDEX_SCHEDULE" : "COLD_ARCHIVE_SCHEDULE";
-    return `${label}: not enabled (set ${envVar}=1)`;
+    return `${label}: not enabled (set ${SCHEDULE_ENV_VAR[label]}=1)`;
   }
   if (!entry.last_run_at) {
     return `${label}: enabled (every ${entry.interval_days}d), hasn't run yet`;
@@ -113,9 +119,10 @@ async function refresh() {
     dot.title = `Intents: no heartbeat in over ${Math.round(STALE_AFTER_MS / 60000)} minutes.`;
   }
 
-  // -- index / cold-archive dots --
+  // -- index / publish / cold-archive dots --
   for (const [row, prefix, displayName] of [
     ["index", "index_", "Index"],
+    ["publish", "publish_", "Publish"],
     ["cold-archive", "cold_archive_", "Cold-archive"],
   ]) {
     const entry = pickByPrefix(data?.schedules, prefix);
@@ -131,6 +138,7 @@ export function start(container) {
   el.innerHTML = `
     <span class="agent-heartbeat-dot" data-row="intents" tabindex="0"></span>
     <span class="agent-heartbeat-dot" data-row="index" tabindex="0"></span>
+    <span class="agent-heartbeat-dot" data-row="publish" tabindex="0"></span>
     <span class="agent-heartbeat-dot" data-row="cold-archive" tabindex="0"></span>
   `;
   for (const dot of el.querySelectorAll(".agent-heartbeat-dot")) {
