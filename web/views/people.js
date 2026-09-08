@@ -81,7 +81,7 @@ function renderBreadcrumb(label) {
   home.className = "crumb";
   home.textContent = "All people";
   home.disabled = !label;
-  home.addEventListener("click", renderPeopleGrid);
+  home.addEventListener("click", () => navigateToRoute(null));
   breadcrumbEl.appendChild(home);
   if (!label) return;
 
@@ -96,6 +96,36 @@ function renderBreadcrumb(label) {
   breadcrumbEl.append(sep, current);
 }
 
+function subFromHash() {
+  const parts = location.hash.replace(/^#/, "").split("/");
+  return parts.length > 1 && parts[1] ? decodeURIComponent(parts[1]) : null;
+}
+
+// Click-driven navigation: pushes a history entry via location.hash (a
+// hashchange fires back into onHashChange below, which does the actual
+// render) so Back steps out of a person's gallery to the grid, same as
+// Folders' drill-down. Re-clicking the same target produces an identical
+// hash and thus no hashchange event, so that case applies directly.
+function navigateToRoute(sub) {
+  const hash = sub ? `#people/${encodeURIComponent(sub)}` : "#people";
+  if (location.hash === hash) applyRoute(sub);
+  else location.hash = hash;
+}
+
+// The actual state change — no opinion on the URL. Called both by a fresh
+// navigation and by onHashChange when the browser's Back/Forward button (or
+// a pasted link) lands here directly. Falls back to the grid for an unknown
+// or not-yet-loaded personId rather than erroring.
+function applyRoute(sub) {
+  if (sub === "unsorted" && unsorted.length) openUnsorted();
+  else if (sub && people.has(sub)) openPerson(sub);
+  else renderPeopleGrid();
+}
+
+export function onHashChange() {
+  applyRoute(subFromHash());
+}
+
 function renderPersonTile(personId, info) {
   const tile = document.createElement("div");
   tile.className = "card person-card";
@@ -106,7 +136,7 @@ function renderPersonTile(personId, info) {
   label.className = "person-label";
   label.textContent = personLabel(personId, info.entries.length);
   tile.append(img, label);
-  tile.addEventListener("click", () => openPerson(personId));
+  tile.addEventListener("click", () => navigateToRoute(personId));
 
   const cover = info.entries[0];
   applyFaceCrop(img, cover.bbox);
@@ -130,7 +160,7 @@ function renderUnsortedTile() {
   label.className = "person-label";
   label.textContent = `Unsorted · ${unsorted.length} photo${unsorted.length === 1 ? "" : "s"}`;
   tile.append(img, label);
-  tile.addEventListener("click", openUnsorted);
+  tile.addEventListener("click", () => navigateToRoute("unsorted"));
 
   getDownloadURL(ref(storage, unsorted[0].item.thumbnail_key))
     .then((url) => { img.src = url; })
@@ -227,7 +257,7 @@ async function load() {
       else people.set(personId, info);
     }
 
-    renderPeopleGrid();
+    applyRoute(subFromHash());
   } catch (err) {
     statusEl.textContent = `Failed to load: ${err.message}`;
     console.error(err);

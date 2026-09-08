@@ -39,14 +39,24 @@ signinBtn.addEventListener("click", () => {
 });
 signoutBtn.addEventListener("click", () => signOut(auth));
 
+// Only the first "/"-separated segment picks the view; anything after it is
+// that view's own business (Folders' path, People's open person) — see each
+// view's onHashChange for how it reads its own sub-path back out.
 function viewNameFromHash() {
-  const name = location.hash.replace("#", "");
+  const name = location.hash.replace("#", "").split("/")[0];
   return VIEWS[name] ? name : DEFAULT_VIEW;
 }
 
 function route() {
   const name = viewNameFromHash();
-  if (name === currentView) return;
+  if (name === currentView) {
+    // Same top-level view, but the hash still changed underneath it (a
+    // folder drilled into, a person opened, or the browser's Back/Forward
+    // button) — let the view sync itself instead of a full remount, so a
+    // click three folders deep doesn't re-fetch from the root every time.
+    VIEWS[name].onHashChange?.();
+    return;
+  }
 
   // The photo modal is a body-level singleton (see photoModal.js), not
   // owned by any one view — without this, it could stay open floating

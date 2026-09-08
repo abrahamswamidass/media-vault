@@ -6,7 +6,7 @@
 // without reading every item under X at least once. Bounded the same way
 // Browse bounds its own cost: paginated, "Load more" to see further in.
 import {
-  collection, query, orderBy, where, limit, startAfter, getDocs,
+  collection, query, orderBy, where, limit, startAt, startAfter, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { db, storage } from "../firebase.js";
@@ -30,7 +30,13 @@ let loadMoreBtn = null;
 let hiddenPrefixes = new Set(); // path prefixes (each ending "/") hidden from Browse/Map
 
 let path = []; // [] = root; e.g. ["percial", "Photos", "2021"]
-let lastDoc = null;
+// Value-based pagination cursor (a plain item_id string, not a document
+// snapshot) -- lets a page jump straight past an entire discovered
+// subfolder's contents (cursorMode "at") instead of always resuming
+// immediately after the last document seen (cursorMode "after"). See
+// loadPage()'s tail for which mode gets picked each time.
+let cursor = null;
+let cursorMode = "after";
 let exhausted = false;
 let loading = false;
 const folderNames = new Set(); // subfolder names seen so far at the current path
@@ -126,9 +132,24 @@ function renderFileCard(item) {
   filesGridEl.appendChild(card);
 }
 
-function navigateTo(newPath) {
+function pathToHash(newPath) {
+  const encoded = newPath.map(encodeURIComponent).join("/");
+  return encoded ? `#folders/${encoded}` : "#folders";
+}
+
+function pathFromHash() {
+  const parts = location.hash.replace(/^#/, "").split("/").filter(Boolean);
+  parts.shift(); // drop the "folders" view segment itself
+  return parts.map(decodeURIComponent);
+}
+
+// The actual state change — reset pagination, re-render — with no opinion
+// on the URL. Called both on a fresh navigation and by onHashChange when
+// the browser's Back/Forward button (or a pasted link) lands here directly.
+function applyPath(newPath) {
   path = newPath;
-  lastDoc = null;
+  cursor = null;
+  cursorMode = "after";
   exhausted = false;
   folderNames.clear();
   fileItems.length = 0;
@@ -140,6 +161,21 @@ function navigateTo(newPath) {
     statusEl.textContent = `Failed to load: ${err.message}`;
     console.error(err);
   });
+}
+
+// Click-driven navigation: pushes a history entry via location.hash (a
+// hashchange fires back into onHashChange below, which does the actual
+// work) so Back steps out one folder level at a time. Re-clicking the
+// folder already open would produce an identical hash and thus no
+// hashchange event, so that case applies directly instead.
+function navigateTo(newPath) {
+  const hash = pathToHash(newPath);
+  if (location.hash === hash) applyPath(newPath);
+  else location.hash = hash;
+}
+
+export function onHashChange() {
+  applyPath(pathFromHash());
 }
 
 async function loadPage() {
@@ -157,7 +193,9 @@ async function loadPage() {
     collection(db, "items"), orderBy("item_id"),
     where("item_id", ">=", prefix), where("item_id", "<", `${prefix}`),
   ];
-  if (lastDoc) clauses.push(startAfter(lastDoc));
+  if (cursor !== null) {
+    clauses.push(cursorMode === "at" ? startAt(cursor) : startAfter(cursor));
+  }
   clauses.push(limit(PAGE_SIZE));
 
   const snap = await getDocs(query(...clauses));
@@ -165,19 +203,28 @@ async function loadPage() {
     exhausted = true;
     loadMoreBtn.hidden = true;
   } else {
-    lastDoc = snap.docs[snap.docs.length - 1];
     for (const doc of snap.docs) {
       const item = doc.data();
       const rest = item.item_id.slice(prefix.length);
       const slashAt = rest.indexOf("/");
       if (slashAt === -1) {
         renderFileCard(item);
+        cursor = item.item_id;
+        cursorMode = "after";
       } else {
         const name = rest.slice(0, slashAt);
         if (!folderNames.has(name)) {
           folderNames.add(name);
           renderFolderTile(name);
         }
+        // Jump past this entire subfolder's contents on the next page
+        // instead of paging through them document-by-document -- once a
+        // subfolder is known, nothing inside it can teach us about another
+        // sibling at this level. "" is the same upper-bound sentinel
+        // the range query above uses, so this cursor value sorts after
+        // every possible item_id under `name/`.
+        cursor = `${prefix}${name}/`;
+        cursorMode = "at";
       }
     }
     if (snap.docs.length < PAGE_SIZE) {
@@ -213,7 +260,7 @@ export function mount(container) {
   loadHiddenPrefixes()
     .then((prefixes) => { hiddenPrefixes = prefixes; })
     .catch((err) => console.error("hidden folders:", err))
-    .finally(() => navigateTo([]));
+    .finally(() => applyPath(pathFromHash()));
 }
 
 export function unmount() {
