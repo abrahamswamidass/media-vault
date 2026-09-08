@@ -31,6 +31,7 @@ import signal
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Optional
 
 from .catalog import Catalog, dedup as dedup_mod, scanner
@@ -704,6 +705,7 @@ def _process_intents_once(args, intents_store, catalog) -> tuple[int, int]:
         if result.ok:
             done += 1
             intents_store.complete(intent.id, result.to_dict())
+            _maybe_notify_fullres_ready(intent)
         else:
             failed += 1
             intents_store.fail(intent.id, result.to_dict())
@@ -711,6 +713,65 @@ def _process_intents_once(args, intents_store, catalog) -> tuple[int, int]:
 
     print(f"{done} done, {failed} failed.")
     return done, failed
+
+
+def _maybe_notify_fullres_ready(intent) -> None:
+    """Push a Web Push notification once a `fetch_fullres` intent finishes,
+    opt-in via NOTIFY_LIVE=1 -- off by default, same as every other live
+    switch here. Fires on a no-op result too (the preview was already
+    there) since the requester still wants to know it's ready to view.
+
+    Best-effort only: any failure here is printed and swallowed, never
+    raised -- the full-res fetch itself already succeeded by the time this
+    runs, so a broken notification is never a reason to mark the intent
+    failed.
+    """
+    if intent.type != "fetch_fullres" or os.getenv("NOTIFY_LIVE", "0") != "1":
+        return
+
+    private_key = _read_secret(os.getenv("VAPID_PRIVATE_KEY_FILE")) or os.getenv("VAPID_PRIVATE_KEY")
+    subject = os.getenv("VAPID_SUBJECT")
+    if not private_key or not subject:
+        print("  NOTIFY_LIVE=1 but VAPID_PRIVATE_KEY(_FILE) / VAPID_SUBJECT "
+              "not set -- skipping notify.")
+        return
+
+    from . import notify
+    from .sync.push_subscriptions import FirestorePushSubscriptions
+
+    subs = FirestorePushSubscriptions()
+    try:
+        subscriptions = subs.list_all()
+    except Exception as e:
+        print(f"  notify: could not list subscriptions: {e}")
+        return
+
+    name = PurePosixPath(intent.item_id).name
+    for sub in subscriptions:
+        try:
+            ok = notify.send(
+                {"endpoint": sub["endpoint"], "keys": sub["keys"]},
+                title="Full-res ready", body=name, url="/",
+                vapid_private_key=private_key, vapid_subject=subject,
+            )
+            if not ok:
+                subs.remove(sub["id"])
+        except notify.NotifyUnavailable as e:
+            print(f"  notify: {e}")
+            return
+        except Exception as e:
+            print(f"  notify: failed for one device: {e}")
+
+
+def _read_secret(path: Optional[str]) -> Optional[str]:
+    """Read a one-line (or whole-file, for a PEM) secret, or None if unset.
+    Same shape as connectors/__init__.py's _read_secret -- a private-key
+    FILE wins over a plain env var since it doesn't end up in `docker
+    inspect` or shell history the way a plain env var does."""
+    if not path:
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
 
 
 def _schedule_due(catalog, name: str, interval_days: int) -> bool:

@@ -640,3 +640,66 @@ docker exec media-vault-container python -m mediavault.cli publish nas --commit
 pushes real thumbnails to the bucket and metadata documents to Firestore's
 `items` collection. From here, continue to [web.md](web.md) to set up the
 browser viewer.
+
+---
+
+## Notifications (optional)
+
+Needs Cloud mirror (above) set up first — subscriptions live in Firestore's
+`push_subscriptions/` collection, read with the same service-account
+credentials as everything else.
+
+What it's for today: telling you when a "Request full-res" tap (see
+[web.md](web.md)) has actually finished — the agent reads the real file off
+the NAS and derives a viewable copy in the background, and `--interval 600`
+(the container's default poll cadence) means that can take a few minutes.
+A push notification means you don't have to keep checking back.
+
+**1. Generate a VAPID keypair** (one-time; a Python one-liner using the
+`cryptography` package, which Pillow already depends on):
+
+```python
+import base64
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+
+key = ec.generate_private_key(ec.SECP256R1())
+pem = key.private_bytes(
+    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+    serialization.NoEncryption())
+with open("vapid_private.pem", "wb") as f:
+    f.write(pem)
+
+nums = key.public_key().public_numbers()
+point = b"\x04" + nums.x.to_bytes(32, "big") + nums.y.to_bytes(32, "big")
+print(base64.urlsafe_b64encode(point).rstrip(b"=").decode())  # -> VAPID_PUBLIC_KEY
+```
+
+2. Copy `vapid_private.pem` into `C:\mediavault\secrets` (already mounted at
+   `/secrets`).
+3. Paste the printed public key into `web/firebase-config.js`'s
+   `VAPID_PUBLIC_KEY` export — it's the public half, safe to commit, same as
+   the Firebase API key already there. Redeploy hosting after changing it.
+4. Add these env vars to the `docker run` command in [setup.md](setup.md):
+
+```powershell
+  -e NOTIFY_LIVE=1 `
+  -e VAPID_PRIVATE_KEY_FILE=/secrets/vapid_private.pem `
+  -e VAPID_SUBJECT=mailto:you@example.com `
+```
+
+`VAPID_SUBJECT` is a contact address the push service can reach you at if it
+needs to — required by the Web Push spec, not used for anything else.
+
+5. `doctor` confirms all three are set. From the web app, tap the
+   "Enable notifications" button in the header — the browser asks for
+   permission, then registers itself. On iPhone this only works from an
+   installed PWA (Share → Add to Home Screen), not a plain Safari tab; iOS
+   16.4+ is required.
+
+Regenerating the keypair invalidates every existing subscription (each
+browser would need to tap "Enable notifications" again) — treat it like
+rotating any other credential, not something to do casually.
+
+Nothing here is billed: the push service itself doesn't charge, and a
+subscription is one small Firestore document per device.

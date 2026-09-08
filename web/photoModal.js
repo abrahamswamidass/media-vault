@@ -8,7 +8,7 @@
 // calls on every navigation.
 import { getDownloadURL, ref } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { storage } from "./firebase.js";
-import { stageForAmazon } from "./intents.js";
+import { fetchFullRes, stageForAmazon } from "./intents.js";
 
 let modal = null;
 let items = [];
@@ -122,8 +122,32 @@ function render(item) {
   const stageBtn = modal.querySelector(".modal-stage-amazon");
   stageBtn.disabled = false;
   stageBtn.textContent = "Stage for Amazon";
+  const fullresBtn = modal.querySelector(".modal-fullres");
+  fullresBtn.disabled = false;
+  fullresBtn.textContent = "Request full-res";
   modal.querySelector(".modal-stage-status").textContent = "";
   modal.hidden = false;
+}
+
+async function handleFetchFullRes() {
+  const item = items[currentIndex];
+  if (!item) return;
+  closeMenu();
+  const btn = modal.querySelector(".modal-fullres");
+  const status = modal.querySelector(".modal-stage-status");
+  btn.disabled = true;
+  btn.textContent = "Requesting…";
+  try {
+    await fetchFullRes(item);
+    btn.textContent = "Requested ✓";
+    status.textContent = "Waiting for the agent to fetch it — enable notifications "
+      + "(header) to be told when it's ready.";
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Request full-res";
+    status.textContent = `Failed: ${err.message}`;
+    console.error(item.item_id, err);
+  }
 }
 
 async function handleStageForAmazon() {
@@ -191,10 +215,7 @@ function build() {
         <div class="modal-menu-wrap">
           <button class="modal-nav modal-menu-toggle" type="button" aria-label="More actions">&#8942;</button>
           <div class="modal-menu" hidden>
-            <button class="modal-fullres" disabled
-              title="Not wired up yet — the agent-side processor now exists (process-intents), this button just doesn't call it yet.">
-              Request full-res (coming soon)
-            </button>
+            <button class="modal-fullres" type="button">Request full-res</button>
             <button class="modal-stage-amazon" type="button">Stage for Amazon</button>
           </div>
         </div>
@@ -227,6 +248,7 @@ function build() {
   modal.querySelector(".modal-prev").addEventListener("click", () => showAt(currentIndex - 1));
   modal.querySelector(".modal-next").addEventListener("click", () => showAt(currentIndex + 1));
   modal.querySelector(".modal-stage-amazon").addEventListener("click", handleStageForAmazon);
+  modal.querySelector(".modal-fullres").addEventListener("click", handleFetchFullRes);
   // Registered once, ever — the modal is a body-level singleton, not
   // recreated per view mount, so this never needs a matching removeListener.
   document.addEventListener("keydown", handleKeydown);

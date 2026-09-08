@@ -8,6 +8,7 @@ import { auth } from "./firebase.js";
 import { ALLOWED_EMAILS } from "./firebase-config.js";
 import { closePhotoModal } from "./photoModal.js";
 import * as agentHeartbeat from "./agentHeartbeat.js";
+import * as push from "./push.js";
 import * as browseView from "./views/browse.js";
 import * as mapView from "./views/map.js";
 import * as foldersView from "./views/folders.js";
@@ -29,6 +30,7 @@ const signinEl = document.getElementById("signin");
 const signinBtn = document.getElementById("signin-btn");
 const signoutBtn = document.getElementById("signout-btn");
 const heartbeatEl = document.getElementById("agent-heartbeat");
+const notifyToggleBtn = document.getElementById("notify-toggle");
 
 let currentView = null;
 
@@ -38,6 +40,24 @@ signinBtn.addEventListener("click", () => {
   });
 });
 signoutBtn.addEventListener("click", () => signOut(auth));
+
+async function refreshNotifyToggle() {
+  notifyToggleBtn.textContent = (await push.isSubscribed())
+    ? "Notifications on" : "Enable notifications";
+}
+
+notifyToggleBtn.addEventListener("click", async () => {
+  notifyToggleBtn.disabled = true;
+  try {
+    if (await push.isSubscribed()) await push.unsubscribe();
+    else await push.subscribe();
+  } catch (err) {
+    statusEl.textContent = `Notifications: ${err.message}`;
+    console.error(err);
+  }
+  await refreshNotifyToggle();
+  notifyToggleBtn.disabled = false;
+});
 
 // Only the first "/"-separated segment picks the view; anything after it is
 // that view's own business (Folders' path, People's open person) — see each
@@ -80,6 +100,7 @@ onAuthStateChanged(auth, (user) => {
   viewEl.hidden = !signedIn;
   signoutBtn.hidden = !signedIn;
   heartbeatEl.hidden = !signedIn;
+  notifyToggleBtn.hidden = !signedIn || !push.isSupported();
 
   if (!user) {
     agentHeartbeat.stop();
@@ -94,6 +115,7 @@ onAuthStateChanged(auth, (user) => {
   }
   statusEl.textContent = "";
   agentHeartbeat.start(heartbeatEl);
+  if (notifyToggleBtn.hidden === false) refreshNotifyToggle();
   if (!location.hash) location.hash = `#${DEFAULT_VIEW}`;
   route();
 });

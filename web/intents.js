@@ -20,3 +20,7 @@ export async function writeIntent(type, itemId, params = {}) {
 export function stageForAmazon(item) {
   return writeIntent("stage_for_amazon", item.item_id, { source: item.source });
 }
+
+export function fetchFullRes(item, variant = "preview") {
+  return writeIntent("fetch_fullres", item.item_id, { source: item.source, variant });
+}

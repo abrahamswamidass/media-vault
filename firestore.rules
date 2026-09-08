@@ -68,5 +68,21 @@ service cloud.firestore {
       allow delete: if request.auth != null
                     && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
     }
+
+    // Client-owned, same reasoning as hidden_folders/ above: registering a
+    // browser for push notifications is a device preference, not a file
+    // mutation, so it's written straight here rather than as an intent —
+    // see web/push.js. The agent only ever reads this collection (via its
+    // Admin client, bypassing these rules) to know who to notify.
+    match /push_subscriptions/{docId} {
+      allow read: if false;  // the browser writes its own subscription and never reads it back
+      allow create, update: if request.auth != null
+                   && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"]
+                   && request.resource.data.keys().hasOnly(["endpoint", "keys", "created_at"])
+                   && request.resource.data.endpoint is string
+                   && request.resource.data["keys"] is map;
+      allow delete: if request.auth != null
+                    && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
+    }
   }
 }

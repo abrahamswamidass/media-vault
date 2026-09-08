@@ -29,3 +29,12 @@ export const GCS_BUCKET = "mymediavault";
 // matching allowlist in firestore.rules and storage.rules, which run
 // server-side and must be kept in sync with this list by hand.
 export const ALLOWED_EMAILS = ["winfredbe@gmail.com", "percial@gmail.com"];
+
+// The VAPID public key PushManager.subscribe() signs a subscription against —
+// safe to commit, the same way a Firebase API key is (see the note at the top
+// of this file): it's the PUBLIC half of the pair. The agent holds the
+// PRIVATE half (VAPID_PRIVATE_KEY_FILE, see agent/.env.example) and never
+// shares it. Regenerating this pair invalidates every existing subscription —
+// see docs/agent.md's notifications section.
+export const VAPID_PUBLIC_KEY =
+  "BLW0n79y5WTdPgOF8m6MhGTAgAL9dFj0FQAJSGIoi4_6h3wZzEAIQkSyNFvlZyg0bUWqg9WuDNxJWb3a-7y66FE";

@@ -28,11 +28,13 @@ agent/           Module 1 — local Python. The only thing that touches files.
     imaging.py     the one place that decodes a photo
     metadata.py    the one place that reads EXIF (date, camera, GPS, video duration)
     faces.py       the one place that runs the face model (FACES_LIVE=1)
+    notify.py      the one place that sends a Web Push notification (NOTIFY_LIVE=1)
     catalog/       SQLite index: store, resumable scanner, dedup engine,
                    people.py (face clustering — embeddings stay local, only
                    an opaque person_id ever reaches Firestore)
     actions/       every mutation, as a Command object
-    sync/          intents in, facts out
+    sync/          intents in, facts out; push_subscriptions.py reads (never
+                   writes) the browser-owned push_subscriptions/ collection
     doctor.py      preflight config check
     cli.py
   tests/
@@ -81,7 +83,15 @@ web/             Module 2 — Firebase Hosting. Currently a minimal static app
                  than duplicated per view — app.js's router force-closes it
                  on every navigation so it can't outlive the view that
                  opened it. Picking a photo to stage happens in that modal
-                 (intents.js), not in the Amazon tab itself. Google sign-in
+                 (intents.js), which also carries "Request full-res"
+                 (`fetch_fullres` intent -- see agent/actions/derive.py's
+                 FetchFullResAction). A header toggle (push.js) registers the
+                 browser for Web Push, same client-owned shape as
+                 hidden_folders/ -- subscribing is a device preference, not
+                 a file mutation, so it writes straight to push_subscriptions/
+                 rather than as an intent; the agent (notify.py, opt-in via
+                 NOTIFY_LIVE=1) only ever reads that collection, to tell you
+                 when a full-res fetch is ready. Google sign-in
                  gated to a small hardcoded allowlist (family/household
                  accounts, not the general public); enforced server-side by
                  firestore.rules/storage.rules, not by hiding the URL. See

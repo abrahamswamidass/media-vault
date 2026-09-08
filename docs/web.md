@@ -163,6 +163,25 @@ running as an orphaned background process, the same trap a stray `dedup
 `-it`, Ctrl+C reaches the process directly and it stops cleanly, no orphan
 left behind.
 
+## Requesting full-res, and getting notified
+
+Same photo-view menu as "Stage for Amazon" — "Request full-res" writes a
+`fetch_fullres` intent instead. The thumbnail everywhere else in the app is
+already a small derivative; this is for when you actually want to look
+closer or download the real file. The agent picks it up the same way (up to
+`--interval 600`'s ~10-minute cadence), reads the original off the NAS, and
+pushes a 2048px preview (or the untouched original, for the `"original"`
+variant) to a `previews/` blob that a GCS lifecycle rule empties again after
+a day — nothing accumulates from tapping this.
+
+The **"Enable notifications"** button in the header (hidden unless the
+agent's operator has set up [Notifications](agent.md#notifications-optional))
+subscribes this browser so you're told the moment that full-res copy is
+ready, instead of having to come back and check. On iPhone this only works
+from an installed PWA — see below — not a plain Safari tab, and needs iOS
+16.4+. Tapping the notification focuses this app if it's already open
+rather than opening a duplicate tab.
+
 ## Add it to your phone's home screen
 
 For a proper app-like icon — `manifest.json` and the `apple-touch-icon` are

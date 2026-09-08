@@ -177,7 +177,40 @@ def run_checks() -> list[Check]:
             "Set GCS_LIVE=1 in agent/.env once the bucket and service account exist. "
             "Everything else works without this."))
 
-    # --- 5. Local state -------------------------------------------------- #
+    # --- 5. Web Push notifications: opt-in, needs Cloud mirror too. ------ #
+    notify_live = env("NOTIFY_LIVE", "0") == "1"
+    if notify_live:
+        if env("VAPID_PRIVATE_KEY_FILE") or env("VAPID_PRIVATE_KEY"):
+            checks.append(Check(
+                "Notifications", "VAPID private key", OK,
+                "via VAPID_PRIVATE_KEY_FILE" if env("VAPID_PRIVATE_KEY_FILE")
+                else "via VAPID_PRIVATE_KEY env var"))
+        else:
+            checks.append(Check(
+                "Notifications", "VAPID private key", FAIL, "not configured",
+                "Set VAPID_PRIVATE_KEY_FILE to a PEM file under secrets/ (preferred), "
+                "or VAPID_PRIVATE_KEY as a plain env var. See docs/agent.md's "
+                "notifications section for how to generate the keypair."))
+        checks.append(Check(
+            "Notifications", "subject", OK if env("VAPID_SUBJECT") else FAIL,
+            env("VAPID_SUBJECT") or "VAPID_SUBJECT not set",
+            "Set VAPID_SUBJECT to \"mailto:you@example.com\" — required by the "
+            "Web Push spec so a push service can contact you about this key."))
+        try:
+            import pywebpush  # noqa: F401
+            checks.append(Check("Notifications", "pywebpush", OK, "available"))
+        except ImportError:
+            checks.append(Check(
+                "Notifications", "pywebpush", FAIL, "not installed",
+                "pip install pywebpush (already listed in requirements.txt)."))
+    else:
+        checks.append(Check(
+            "Notifications", "live mode", WARN,
+            "NOTIFY_LIVE=0 — full-res-ready pushes are never sent",
+            "Set NOTIFY_LIVE=1 in agent/.env once VAPID keys exist. "
+            "Everything else works without this."))
+
+    # --- 6. Local state -------------------------------------------------- #
     catalog_db = env("CATALOG_DB", "/data/catalog/catalog.sqlite")
     catalog_dir = Path(catalog_db).parent
     checks.append(_dir_check(
@@ -186,7 +219,7 @@ def run_checks() -> list[Check]:
         fix="Set HOST_CATALOG in agent/.env. The index, action journal, and "
             "thumbnail cache live here and must survive between runs."))
 
-    # --- 6. Optional tooling --------------------------------------------- #
+    # --- 7. Optional tooling --------------------------------------------- #
     checks.append(_binary_check(
         "Tooling", "exiftool", "exiftool",
         "Baked into the Docker image. Only missing if you are running outside it."))
