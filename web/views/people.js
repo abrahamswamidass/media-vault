@@ -29,16 +29,18 @@ function personLabel(personId, count) {
   return `Person ${personId} · ${count} photo${count === 1 ? "" : "s"}`;
 }
 
-// Zooms the already object-fit:cover-filled thumbnail toward the specific
-// face this tile represents, using item.faces' normalized [x1,y1,x2,y2]
-// (see maintenance.py's PublishAction) rather than showing whatever
-// object-fit's own default centering happened to crop to -- the whole
-// point of this view is "which person," and a random center-crop of a
-// group photo often doesn't even include them. transform-origin at the
-// face's center point plus a uniform scale zooms toward it without
-// distorting the image, same trick as a CSS "face-aware thumbnail."
-// No-op (leaves the plain cover-fit image) when bbox is unknown --
-// items published before this field existed, until they're republished.
+// Zooms the thumbnail toward the specific face this tile represents, using
+// item.faces' normalized [x1,y1,x2,y2] (see maintenance.py's PublishAction).
+//
+// Sets BOTH object-position and a matching transform-origin, not
+// transform-origin alone: object-fit:cover's own crop happens first and
+// defaults to centering on the image's geometric middle, which can throw
+// away the face entirely before any zoom ever runs -- a face near the edge
+// of a landscape group photo, cropped into a square tile, can end up
+// outside the cover-fitted region altogether, so a transform later has
+// nothing but shoulders/clothing left to zoom into. Setting object-position
+// to the face's own center makes the cover-crop itself center on the right
+// spot first; the scale on top then zooms further into that same point.
 function applyFaceCrop(img, bbox) {
   if (!bbox) return;
   const [x1, y1, x2, y2] = bbox;
@@ -49,6 +51,7 @@ function applyFaceCrop(img, bbox) {
   // enough to actually isolate a face in a big group shot without going
   // absurd on a tiny, low-resolution detection.
   const zoom = Math.min(3, Math.max(1, 0.6 / faceSpan));
+  img.style.objectPosition = `${cx * 100}% ${cy * 100}%`;
   img.style.transformOrigin = `${cx * 100}% ${cy * 100}%`;
   img.style.transform = `scale(${zoom})`;
 }
