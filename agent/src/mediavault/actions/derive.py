@@ -23,14 +23,18 @@ from ..ports import BlobStore, Connector
 from .base import Action, NoOp
 
 
-def _read_decodable(connector: Connector, item_id: str, mime: str) -> bytes:
-    """Raw bytes ready for Pillow. For video, that's one representative
-    frame (see imaging.frame()) rather than the container itself, which
-    Pillow can't open at all."""
+def _read_decodable(connector: Connector, item_id: str, mime: str) -> tuple[bytes, bytes]:
+    """Returns (decodable, raw). `decodable` is what Pillow can open directly
+    -- for video, that's one representative frame (see imaging.frame()) since
+    Pillow can't open the container at all; for a photo it's the same bytes
+    as `raw`. `raw` is always the file's own untouched bytes as read off the
+    connector -- callers that also want EXIF (which needs the real container,
+    not a video's extracted frame, to read Duration/QuickTime tags) reuse
+    that instead of paying for a second NAS read of the same file."""
     raw = connector.read(item_id)
     if (mime or "").startswith("video/"):
-        return imaging.frame(raw, suffix=Path(item_id).suffix)
-    return raw
+        return imaging.frame(raw, suffix=Path(item_id).suffix), raw
+    return raw, raw
 
 
 class ThumbnailAction(Action):
@@ -44,6 +48,15 @@ class ThumbnailAction(Action):
         self.blobs = blobs
         self.force = force          # re-derive even if the blob already exists
         self._record = None         # cached stat() from validate()
+        # The file's own bytes, if this run actually read them (None on a
+        # NoOp, which reads nothing) -- a plain instance attribute, not part
+        # of the outputs dict, since outputs get JSON-logged (ActionLog) and
+        # a raw image/video buffer has no business in a log file. A caller
+        # that holds this same instance (see PublishAction) can reuse it
+        # instead of re-reading the file for EXIF/phash/faces; nothing else
+        # (the "thumbnail" intent, ActionLog, tests reading .outputs) ever
+        # sees this attribute.
+        self.raw: bytes | None = None
 
     @property
     def target_id(self) -> str:
@@ -77,20 +90,11 @@ class ThumbnailAction(Action):
         key = self._key
         if not self.force and self.blobs.exists(key):
             raise NoOp(f"thumbnail already stored: {key}")
-        decodable = _read_decodable(self.connector, self.item_id, self._record.mime)
+        decodable, raw = _read_decodable(self.connector, self.item_id, self._record.mime)
+        self.raw = raw
         data = imaging.thumbnail(decodable)
         self.blobs.put(key, data, content_type="image/webp")
-        outputs = {"key": key, "bytes": len(data), "url": self.blobs.url(key)}
-        # Perceptual hash rides along for free here (photos only) — this is
-        # already the one full read+decode a fresh thumbnail costs, so
-        # PublishAction picks this up rather than paying for a second full
-        # read just for the hash. See imaging.phash().
-        if (self._record.mime or "").startswith("image/"):
-            try:
-                outputs["phash"] = imaging.phash(decodable)
-            except Exception:
-                pass
-        return outputs
+        return {"key": key, "bytes": len(data), "url": self.blobs.url(key)}
 
 
 class FetchFullResAction(Action):
@@ -171,7 +175,7 @@ class FetchFullResAction(Action):
 
         _, content_type = self.VARIANTS[self.variant]
         if self.variant == "preview":
-            decodable = _read_decodable(self.connector, self.item_id, self._record.mime)
+            decodable, _raw = _read_decodable(self.connector, self.item_id, self._record.mime)
             data = imaging.preview(decodable)
         else:
             data = self.connector.read(self.item_id)

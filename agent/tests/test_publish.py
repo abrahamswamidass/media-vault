@@ -177,6 +177,39 @@ def test_commit_extracts_and_stores_video_duration(nas, catalog, blobs, facts, f
     assert "12.34" in fact_file.read_text()
 
 
+def test_video_exif_reuses_the_original_container_not_the_extracted_frame(
+        nas, catalog, blobs, facts, fake_exiftool, monkeypatch):
+    """A video's `full` (see ThumbnailAction.raw) is the untouched container
+    bytes, never the one JPEG frame extracted for thumbnailing -- exiftool
+    needs the real container to read Duration/QuickTime tags at all, so EXIF
+    must reuse THAT, not the frame, and must not pay for a second read to
+    get it."""
+    (nas / "clip.mov").write_bytes(b"pretend-video-bytes")
+    monkeypatch.setattr("mediavault.actions.derive.imaging.frame",
+                        lambda data, suffix="": b"fake-frame-jpeg")
+    monkeypatch.setattr("mediavault.actions.derive.imaging.thumbnail",
+                        lambda data: b"fake-webp")
+    fake_exiftool["result"] = [{"Composite:Duration": 12.34}]
+    conn = _indexed(nas, catalog)
+
+    full_reads, head_reads = [], []
+    real_read = conn.read
+    def counting_read(item_id, nbytes=0):
+        (full_reads if not nbytes else head_reads).append(item_id)
+        return real_read(item_id, nbytes)
+    monkeypatch.setattr(conn, "read", counting_read)
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    row = catalog.get("nas", "clip.mov")
+    assert row["duration_seconds"] == 12.34
+    # nas/ also has the fixture's own Photos/real.jpg pending -- only care
+    # about how many times THIS item's bytes were fetched: once, reused for
+    # EXIF, not a second dedicated head-read on top of it.
+    assert full_reads.count("clip.mov") == 1
+    assert "clip.mov" not in head_reads
+
+
 def test_missing_exif_tool_does_not_block_publish(nas, catalog, blobs, facts, monkeypatch):
     """PyExifTool not being installed must degrade gracefully, not fail the item."""
     monkeypatch.setitem(sys.modules, "exiftool", None)
@@ -634,31 +667,30 @@ def test_phash_skips_non_image_items(nas, catalog, blobs, facts):
 
 def test_phash_rides_free_on_the_thumbnails_own_decode(nas, catalog, blobs, facts,
                                                         fake_insightface, monkeypatch):
-    """A fresh thumbnail derivation already reads+decodes the whole file —
-    phash must reuse that, not pay for a second full read on top of it.
-    Face detection (when live) still needs its own separate read, since it
-    doesn't share ThumbnailAction's internals — this proves phash isn't
-    ALSO adding a third read on top of that."""
+    """A fresh thumbnail derivation already reads the whole file (see
+    ThumbnailAction.raw) — phash and face detection must both reuse those
+    same bytes, not each pay for their own separate read on top of it (nor
+    a dedicated EXIF read either — see the head-slice in maintenance.py)."""
     import numpy as np
     monkeypatch.setenv("FACES_LIVE", "1")
     fake_insightface["faces"] = [_FakeDetectedFace(
         (1.0, 2.0, 3.0, 4.0), np.array([0.1, 0.2], dtype="float32"), 0.9)]
     conn = _indexed(nas, catalog)
 
-    full_reads = []
+    full_reads, head_reads = [], []
     real_read = conn.read
     def counting_read(item_id, nbytes=0):
-        if not nbytes:
-            full_reads.append(item_id)
+        (full_reads if not nbytes else head_reads).append(item_id)
         return real_read(item_id, nbytes)
     monkeypatch.setattr(conn, "read", counting_read)
 
     PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
 
-    # One read for the thumbnail's own decode (phash rides along with it),
-    # one for face detection — not three, which is what a phash-specific
-    # extra read would cost.
-    assert full_reads == ["Photos/real.jpg", "Photos/real.jpg"]
+    # Exactly one read, full stop — thumbnailing, EXIF, phash, and face
+    # detection all share it, instead of each fetching the same file again
+    # (up to 3 full reads plus a dedicated EXIF head-read, before this).
+    assert full_reads == ["Photos/real.jpg"]
+    assert head_reads == []
     assert catalog.get("nas", "Photos/real.jpg")["phash"] is not None
     assert fake_insightface["calls"] == 1
     assert len(catalog.faces_for_item("nas", "Photos/real.jpg")) == 1  # not duplicated

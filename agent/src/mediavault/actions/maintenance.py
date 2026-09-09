@@ -229,13 +229,26 @@ class PublishAction(Action):
         for row in self._pending:
             item_id = row["item_id"]
             try:
-                thumb = ThumbnailAction(item_id, self.connector, self.blobs).run(commit=True)
+                thumb_action = ThumbnailAction(item_id, self.connector, self.blobs)
+                thumb = thumb_action.run(commit=True)
                 if thumb.status == "failed":
                     failed.append({"item_id": item_id, "error": thumb.error})
                     continue
                 # A "no-op" thumbnail (already stored) has no outputs — the key is
                 # deterministic from the hash, so recompute it rather than skip.
                 key = thumb.outputs.get("key") or blob_key(row["quick_hash"], "thumbs", "webp")
+
+                # A fresh thumbnail derivation already read the file's own
+                # bytes off the NAS (thumb_action.raw — None on a NoOp, which
+                # reads nothing). Reused below for EXIF/phash/faces instead
+                # of each paying for its own separate read of the same file
+                # — what used to be up to 3 NAS reads (thumbnail, a dedicated
+                # EXIF head-read, a dedicated full read for phash/faces) for
+                # one newly-published item collapses to the 1 this loop
+                # can't avoid anyway. `full` stays None here until/unless
+                # something below still needs a read of its own (the NoOp
+                # backfill case, e.g. a --force republish).
+                full = thumb_action.raw
 
                 # EXIF is a bonus, not a requirement — most exports/screenshots
                 # have none, and PyExifTool/exiftool might not even be
@@ -244,7 +257,8 @@ class PublishAction(Action):
                 exif = {}
                 try:
                     suffix = PurePosixPath(item_id).suffix
-                    head = self.connector.read(item_id, nbytes=_EXIF_HEAD_BYTES)
+                    head = full[:_EXIF_HEAD_BYTES] if full is not None \
+                        else self.connector.read(item_id, nbytes=_EXIF_HEAD_BYTES)
                     exif = metadata.extract(head, suffix=suffix)
                 except Exception:
                     exif = {}
@@ -257,15 +271,10 @@ class PublishAction(Action):
                 # Perceptual hash: a bonus, always-on for images (cheap
                 # relative to face detection, no model/live-switch needed) —
                 # for near-duplicate review grouping in the web module, see
-                # imaging.phash(). Free on a fresh thumbnail derivation
-                # (ThumbnailAction already decoded the image — see its own
-                # phash output); a NoOp thumbnail (already stored) has no
-                # outputs, so an item published before this field existed
-                # falls back to its own dedicated read below, once, and is
-                # persisted so it's never paid for again after that.
+                # imaging.phash(). An item published before this field
+                # existed falls back to its own dedicated read below, once,
+                # and is persisted so it's never paid for again after that.
                 phash = row["phash"]
-                if phash is None and is_image:
-                    phash = thumb.outputs.get("phash")
                 need_phash = phash is None and is_image
 
                 # Faces are a bonus too — never block publishing. Gated
@@ -305,8 +314,12 @@ class PublishAction(Action):
                 ]
                 need_faces = not existing and os.getenv("FACES_LIVE", "0") == "1" and is_image
 
-                full = None
-                if need_faces or need_phash:
+                # `full` is already set above when the thumbnail step itself
+                # read the file (the common case: a never-before-published
+                # item). Only pay for a fresh read here on the NoOp-thumbnail
+                # backfill path -- nothing has touched the NAS for this item
+                # yet in that case.
+                if full is None and (need_faces or need_phash):
                     try:
                         full = self.connector.read(item_id)
                     except Exception:
