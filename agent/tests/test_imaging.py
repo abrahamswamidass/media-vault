@@ -27,7 +27,12 @@ imagehash = pytest.importorskip("imagehash", reason="needs ImageHash (imaging ex
 from mediavault import imaging  # noqa: E402
 
 
-def _heic_bytes(color=(120, 180, 90), size=(800, 600)) -> bytes:
+def _heic_bytes(color=(120, 180, 90), size=(3200, 2400)) -> bytes:
+    # Deliberately larger than any realistic THUMB_MAX_EDGE — downscale()
+    # never upscales (see imaging.py), so a fixture smaller than the current
+    # threshold would silently stop proving a real downscale happened at all
+    # the moment that threshold changes (exactly what broke this test when
+    # THUMB_MAX_EDGE moved from 400 to 1080 past its old 800x600 size).
     im = Image.new("RGB", size, color=color)
     heif_file = pillow_heif.from_pillow(im)
     buf = io.BytesIO()
