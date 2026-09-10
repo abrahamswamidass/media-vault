@@ -381,12 +381,21 @@ class PublishAction(Action):
                     "phash": phash,
                 })
                 self.catalog.mark_published(self.source, item_id)
+                # Committed per item, not once at the end of the whole batch:
+                # Firestore's fact just above already landed durably the
+                # moment facts.put() returned, but the local catalog's own
+                # bookkeeping (published_at, phash, faces) stayed invisible to
+                # any other connection -- including a `stats` run in another
+                # terminal -- until one giant commit after potentially
+                # hundreds of items. That made a long FACES_LIVE=1 batch look
+                # stalled even while it was actively working, and meant a
+                # crash or OOM partway through lost every item's progress,
+                # not just the one in flight. SQLite commits are cheap in
+                # WAL mode, so there's no real cost to doing this every time.
+                self.catalog.conn.commit()
                 published.append(item_id)
             except Exception as e:
                 failed.append({"item_id": item_id, "error": str(e)})
-
-        if published:
-            self.catalog.conn.commit()
 
         if not published:
             # A NoOp's outputs never reach the caller (Action.run() discards
