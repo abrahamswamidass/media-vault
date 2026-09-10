@@ -409,6 +409,24 @@ class Catalog:
                 scans = c.execute("DELETE FROM scans").rowcount
         return {"items_deleted": items, "scans_deleted": scans}
 
+    def reset_published(self, source: str) -> int:
+        """Clear published_at for every active row in one source, without
+        touching anything else -- quick_hash, EXIF, phash, faces, and
+        cold_archived_at are all left exactly as they are. Unlike reset()
+        (which deletes the rows entirely, forcing a full re-index and
+        re-detection of everything), this exists for the narrower case:
+        thumbnails/facts need a fresh pass over the WHOLE source -- e.g. a
+        deleted GCS bucket prefix -- but nothing else about these items is
+        wrong. The next plain `publish` (no --force needed) then treats
+        every row as needing (re)publishing on its own; content-addressed
+        blobs that already exist are found via ThumbnailAction's own
+        exists() check and skipped, not re-derived, so this costs nothing
+        extra for items whose thumbnail was never actually missing."""
+        with self.transaction() as c:
+            return c.execute(
+                "UPDATE items SET published_at = NULL WHERE source = ? AND state = 'active'",
+                (source,)).rowcount
+
     def reset_people(self) -> dict:
         """Wipe every detected face and person cluster. Never touches items,
         scans, or anything published — items keep their `published_at`, so a
@@ -472,13 +490,19 @@ class Catalog:
             "AND cold_archived_at IS NOT NULL", (source,)).fetchone()[0]
 
     def not_cold_archived(self, source: str, limit: Optional[int] = None) -> list[sqlite3.Row]:
-        """Active items not yet pushed to cold storage, oldest-indexed first —
+        """Active items not yet pushed to cold storage, in a fixed order —
         same "who's left" shape as unpublished(), so a weekly run only ever
         sees what's new since the last one. No hash/mime requirement: unlike
         a thumbnail, cold storage isn't gated on anything but the file
-        existing in the catalog at all."""
+        existing in the catalog at all.
+
+        Ordered by item_id alone, not indexed_at -- see unpublished()'s own
+        docstring for why: indexed_at gets overwritten on every re-index
+        (even for unchanged files), so sorting by it made a resumed/limited
+        pass see a different worklist order every time a scheduled re-index
+        ran in between, not a stable "pick up where you left off" sequence."""
         sql = ("SELECT * FROM items WHERE source = ? AND state = 'active' "
-               "AND cold_archived_at IS NULL ORDER BY indexed_at, item_id")
+               "AND cold_archived_at IS NULL ORDER BY item_id")
         params: tuple = (source,)
         if limit is not None:
             sql += " LIMIT ?"
@@ -491,7 +515,7 @@ class Catalog:
 
     def unpublished(self, source: str, limit: Optional[int] = None,
                     force: bool = False, mime_only: bool = False) -> list[sqlite3.Row]:
-        """Active, hashed items with no thumbnail/facts pushed yet, oldest-indexed first.
+        """Active, hashed items with no thumbnail/facts pushed yet, in a fixed order.
 
         A hash is required — that's what a thumbnail is content-addressed by —
         so an item still mid-scan (no quick_hash yet) is correctly skipped.
@@ -508,6 +532,15 @@ class Catalog:
         partially re-indexed since) can have a mix of rows with and without
         it. This is how `publish --mime-only` targets just the ones a fresh
         index pass has already reached, without waiting on the rest.
+
+        Ordered by item_id alone, not indexed_at -- indexed_at is overwritten
+        on every re-index pass, even for files that haven't changed (see
+        scanner.py's upsert), so a schedule weekly re-index running between
+        two `publish --max-items N` batches used to reshuffle this whole
+        worklist's order underneath them: a resumed run wasn't actually
+        resuming, it just started over from a different-looking front of the
+        line. item_id (the NAS path) never changes, so it makes the worklist
+        genuinely stable across runs regardless of what else re-indexes.
         """
         sql = (
             "SELECT * FROM items WHERE source = ? AND state = 'active' "
@@ -517,7 +550,7 @@ class Catalog:
             sql += "AND published_at IS NULL "
         if mime_only:
             sql += "AND mime IS NOT NULL AND mime != '' "
-        sql += "ORDER BY indexed_at, item_id"
+        sql += "ORDER BY item_id"
         params: tuple = (source,)
         if limit is not None:
             sql += " LIMIT ?"

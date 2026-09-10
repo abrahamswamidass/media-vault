@@ -11,6 +11,7 @@ Media Vault agent CLI.
     mediavault cold-archive nas --commit --max-items 20   push a small batch first
     mediavault stats                           what the catalog knows
     mediavault reset nas --commit              wipe local catalog data for a source (testing)
+    mediavault unpublish nas --commit          clear published_at only, force a full republish
 
     mediavault nas list --root /data/nas       poke one connector operation
     mediavault nas delete <path> --commit
@@ -647,6 +648,48 @@ def cmd_reset(args) -> int:
         print("Nothing on the NAS or in GCS changed — thumbnails already pushed are "
               "content-addressed, so re-publishing after a re-index finds them and "
               "skips straight to (re)writing the fact.")
+        return 0
+
+
+# --------------------------------------------------------------------------- #
+# unpublish
+# --------------------------------------------------------------------------- #
+def cmd_unpublish(args) -> int:
+    """Clear published_at for one source, without touching anything else —
+    narrower than `reset`, which deletes the catalog rows entirely and forces
+    a full re-index plus re-detecting faces/phash from scratch. This exists
+    for the case that actually keeps coming up: thumbnails need a fresh pass
+    over the WHOLE source (e.g. a GCS bucket prefix got emptied by hand), but
+    nothing else about these items is wrong. After this, a plain `publish`
+    (no --force needed) walks every item again on its own; content-addressed
+    thumbnails that are still there are found via ThumbnailAction's own
+    exists() check and skipped, not re-derived.
+    """
+    with _catalog(args) as catalog:
+        n = catalog.published_count(args.source)
+
+        if not args.commit:
+            if args.json:
+                _emit({"source": args.source, "published_rows": n, "committed": False}, True)
+            else:
+                print(f"DRY-RUN (no change): would clear published_at on {n:,} "
+                      f"item(s) for '{args.source}'. quick_hash/EXIF/phash/faces/"
+                      "cold_archived_at are all left untouched.")
+                print("Re-run with --commit to apply.")
+            return 0
+
+        cleared = catalog.reset_published(args.source)
+
+        if args.json:
+            _emit({"source": args.source, "published_cleared": cleared, "committed": True}, True)
+            return 0
+
+        _banner(True)
+        print(f"Cleared published_at on {cleared:,} item(s) for '{args.source}'.")
+        print("Nothing on the NAS or in GCS changed — a plain `publish` (no --force "
+              "needed) now walks every item again; thumbnails already correct are "
+              "content-addressed, so ThumbnailAction finds them and skips straight "
+              "to (re)writing the fact instead of re-deriving anything.")
         return 0
 
 
@@ -1309,6 +1352,24 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--commit", action="store_true",
                     help="ACTUALLY delete (default: preview only)")
     rs.set_defaults(_fn=cmd_reset)
+
+    # -- unpublish --
+    up = sub.add_parser(
+        "unpublish",
+        help="clear published_at for one source, without touching anything else",
+        description="Narrower than `reset`: clears published_at only, leaving "
+                    "quick_hash/EXIF/phash/faces/cold_archived_at exactly as they are "
+                    "-- no full re-index, no re-detecting faces from scratch. Use this "
+                    "when thumbnails need a fresh pass over a whole source (e.g. a GCS "
+                    "bucket prefix got emptied by hand) but nothing else about these "
+                    "items is wrong. A plain `publish` afterward (no --force needed) "
+                    "walks every item again; content-addressed thumbnails that are "
+                    "still there are found and skipped, not re-derived.")
+    up.add_argument("source", choices=CONNECTORS, help="source to unpublish")
+    up.add_argument("--db", help="catalog database path")
+    up.add_argument("--commit", action="store_true",
+                    help="ACTUALLY clear published_at (default: preview only)")
+    up.set_defaults(_fn=cmd_unpublish)
 
     # -- amazon-stage --
     st = sub.add_parser(

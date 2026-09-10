@@ -26,6 +26,7 @@ what each command actually touches.
 | `cold-archive nas --commit` | Push everything not yet archived. Re-running only pushes what's new since last time — safe to run weekly. |
 | `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
 | `reset --all --commit` | Same, for every source. |
+| `unpublish nas [--commit]` | Clear `published_at` for one source only — quick_hash/EXIF/phash/faces/cold_archived_at are all left untouched, no full re-index needed. For when thumbnails need a fresh pass over the whole source (e.g. a GCS bucket prefix got emptied by hand) but nothing else about these items is wrong. A plain `publish` afterward (no `--force`) walks everything again on its own; thumbnails still there are found via their content-addressed key and skipped, not re-derived. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
 | `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
 | `nas restore "<path>" --commit` | Undo a soft delete — move a file back out of trash to where it came from. Works on `drive` too (clears Drive's own trashed flag). What the web Activity tab's Undo button asks for behind the scenes. |
