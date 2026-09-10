@@ -3,8 +3,15 @@ Image derivation — the one place that decodes a photo and makes a smaller one.
 
 Both derived blobs come from here so their sizing and encoding stay consistent:
 
-    thumbnail   400px edge, WebP  ~30 KB   permanent, bulk-pushed
-    preview    2048px edge, JPEG ~500 KB   on demand, expires in a day
+    thumbnail  1080px edge, WebP ~150-300 KB  permanent, bulk-pushed
+    preview    2048px edge, JPEG ~500 KB      on demand, expires in a day
+
+Thumbnail is 1080px, not something smaller, because it's also what the photo
+modal shows full-screen (see web/photoModal.js) — a phone's retina display
+needs real resolution to look sharp at that size, not just grid-tile size.
+Below this, the modal looked visibly blurry on a phone (upscaling a smaller
+source past its own resolution) even though the same image looked fine in a
+grid tile.
 
 Pillow is an optional import. The core connectors and CLI are stdlib-only by
 design, so anything that needs image decoding says so with a clear error rather
@@ -25,7 +32,7 @@ import tempfile
 from pathlib import Path
 
 #: Sizing presets, keyed by the blob "kind" they produce.
-THUMB_MAX_EDGE = 400
+THUMB_MAX_EDGE = 1080
 PREVIEW_MAX_EDGE = 2048
 
 
