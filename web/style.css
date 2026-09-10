@@ -11,10 +11,46 @@ body {
      content starts right under it unless something adds that room back.
      Unlike the photo modal's topbar (see its own comment below), this isn't
      an overlay guessing an offset — just widening the page's own normal top
-     padding, so it's not subject to the same over/under-correction risk. */
+     padding, so it's not subject to the same over/under-correction risk.
+
+     Left/right too, not just top: rotate the phone to landscape and the
+     notch/Dynamic Island moves to one of the *side* edges instead, with the
+     home indicator's own safe zone on the other. iOS's env() values track
+     whichever edge actually needs it for the current orientation on their
+     own, so the same max(fallback, env(...)) shape just works in both. */
   padding-top: max(1.5rem, env(safe-area-inset-top));
+  padding-left: max(1.5rem, env(safe-area-inset-left));
+  padding-right: max(1.5rem, env(safe-area-inset-right));
   background: #111;
   color: #eee;
+}
+
+.scroll-top-btn {
+  position: fixed;
+  right: 1.25rem;
+  /* max() with the safe-area inset so it clears the home-indicator area on
+     an installed iOS PWA the same way body's own top padding clears the
+     status bar (see body's own comment above) -- otherwise it sits half
+     hidden behind that gesture strip on an iPhone. */
+  bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(40, 40, 40, 0.85);
+  border: 1px solid #444;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  /* Below .nav-menu (2000) and .modal (10000) so it can't paint over either
+     if a scroll happens to leave it visible while one is open, but above
+     ordinary page content (grids, cards) on every view. */
+  z-index: 900;
+}
+
+.scroll-top-btn:hover {
+  background: rgba(51, 51, 51, 0.95);
 }
 
 header {
@@ -80,7 +116,13 @@ button:hover {
   position: absolute;
   top: calc(100% + 0.25rem);
   left: 0;
-  z-index: 10;
+  /* Same reasoning as .modal's own z-index: 10000 below — Leaflet's own
+     controls sit at z-index: 1000 on the Map view, so anything less than
+     that paints underneath the map instead of over it. Below the modal's
+     10000 on purpose: the two never need to be compared in practice (the
+     router force-closes this menu on every navigation, including into the
+     modal), but keeping the ordering consistent costs nothing. */
+  z-index: 2000;
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
@@ -152,13 +194,19 @@ button:hover {
   gap: 0.5rem;
 }
 
-.year-jump {
+.year-jump,
+.month-jump {
   background: #2a2a2a;
   color: #eee;
   border: 1px solid #444;
   border-radius: 6px;
   padding: 0.4rem 0.6rem;
   font-size: 0.9rem;
+}
+
+.month-jump:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .month-group {
@@ -332,10 +380,22 @@ button:hover {
   position: fixed;
   inset: 0;
   z-index: 10000; /* above Leaflet's own controls (z-index: 1000) on the Map view */
-  background: rgba(0, 0, 0, 0.8);
+  /* Solid, not translucent — this app's own page background is already
+     near-black (#111), so a partial-opacity backdrop barely dimmed bright
+     thumbnails/text behind it and the grid stayed readable through the
+     "overlay". A real photo viewer shouldn't show the page behind it at all. */
+  background: #0a0a0a;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+  /* Same reasoning as body's own padding above — .modal is a separate fixed
+     overlay covering the full viewport, not a descendant of body, so it
+     needs this independently. Matters most in landscape on an iPhone,
+     where the notch/Dynamic Island sits on a side edge instead of the top
+     -- without this, the modal's card (and its topbar buttons) can render
+     right up against or under that cutout. */
+  padding-left: max(1.5rem, env(safe-area-inset-left));
+  padding-right: max(1.5rem, env(safe-area-inset-right));
 }
 
 /* [hidden] and .modal have equal specificity, and this stylesheet loads
@@ -346,45 +406,63 @@ button:hover {
 }
 
 /* One column at every size — a native-app-style photo viewer (image full
-   width, a row of icon buttons on top, details as a sheet underneath,
-   toggled by tapping the photo) rather than a desktop-only two-column form
-   that only worked with room to spare.
+   width, a row of icon buttons floating over the top of it, details as a
+   sheet underneath, toggled by tapping the photo) rather than a
+   desktop-only two-column form that only worked with room to spare.
 
-   The topbar is in normal document flow, not floated over the photo —
-   floating it required guessing exactly how much to inset it below the
-   iOS status bar/notch via env(safe-area-inset-top), and that guess was
-   wrong in both directions in testing (clipped the buttons, then
-   overcorrected into a dead gap above the photo). A row above the image
-   needs no such guess and can't clip or leave a gap on any device. */
+   The topbar floats over the photo (position: absolute, below) instead of
+   sitting above it in flow -- each button already carries its own
+   semi-opaque circular background (.modal-nav), so it reads fine over a
+   bright photo without needing a full-width scrim behind it, the same way
+   a native photo viewer's overlay controls do. An earlier attempt at this
+   guessed a fixed pixel inset for the status bar/notch and got it wrong in
+   both directions; env(safe-area-inset-top) (already proven reliable for
+   body's own padding elsewhere in this file) is what makes floating it
+   actually work here. */
 .modal-content {
   position: relative;
   background: #1c1c1c;
   border-radius: 8px;
   padding: 1rem;
-  max-width: 40rem;
+  /* Wide enough to actually use a landscape/desktop viewport instead of
+     leaving a photo stranded in a narrow 640px column -- a portrait photo
+     in particular used to shrink to fit that width and leave huge empty
+     margins either side, even though .modal-media had plenty of unused
+     height to offer it. Still capped (94vw, and 75rem so an ultrawide
+     monitor doesn't stretch it absurdly), and the mobile breakpoint below
+     overrides this back to full-bleed on a phone regardless. */
+  max-width: min(94vw, 75rem);
   width: 100%;
-  max-height: calc(100vh - 3rem);
+  /* A real height, not just max-height -- .modal-media below is a flex: 1
+     child that needs an actual box to grow into. Without this, the column
+     would just shrink-wrap its content and .modal-media would get none of
+     the room it's entitled to. */
+  height: calc(100vh - 3rem);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 
 .modal-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.5rem;
-  flex-shrink: 0;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+    0 max(0.75rem, env(safe-area-inset-left));
 }
 
 /* Edge-to-edge on a phone — the photo itself should reach the screen's
    sides, not sit in a card with its own margin/rounded corners. Text below
    the image keeps its own inset (.modal-stage-status, .modal-details)
    since unpadded body text flush against the screen edge is a readability
-   problem the photo doesn't have. The topbar gets a safe-area-aware top
-   inset here (rather than the whole modal, as before) so it clears the
-   status bar/notch without having to also guess how far to push the image
-   down to match — flow layout handles that on its own. */
+   problem the photo doesn't have. The topbar's own safe-area padding
+   (above) already handles clearing the status bar/notch here — nothing
+   extra needed for it at this breakpoint. */
 @media (max-width: 30rem) {
   .modal {
     padding: 0;
@@ -392,13 +470,8 @@ button:hover {
   .modal-content {
     max-width: 100%;
     height: 100%;
-    max-height: 100%;
     border-radius: 0;
     padding: 0 0 1rem;
-  }
-  .modal-topbar {
-    padding: calc(0.5rem + env(safe-area-inset-top, 0px)) 0.5rem 0;
-    margin-bottom: 0.75rem;
   }
   .modal-content img {
     border-radius: 0;
@@ -409,29 +482,63 @@ button:hover {
   }
 }
 
+/* A phone in landscape (e.g. an iPhone's ~380-430px landscape height) is
+   wide enough to miss the max-width breakpoint above and keep the padded
+   "card" look -- fine on a tall viewport, but on a short one the 1.5rem
+   modal margin plus the card's own 1rem padding is a real double-digit
+   percentage of the whole viewport height, on top of the topbar already
+   floating over the top edge. Zeroing the *vertical* padding only (side
+   padding stays, since a landscape notch sits on a side edge, not top or
+   bottom) hands that space back to the photo. Keyed on height rather than
+   a device/orientation check since that's what's actually scarce here. */
+@media (max-height: 30rem) {
+  .modal {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .modal-content {
+    height: 100%;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
 .modal-topbar-spacer {
   flex: 1;
 }
 
-/* A fixed-height box, image centered inside it — without this, a portrait
-   photo and a landscape photo produce different-height elements, so the
-   photo (and the point on screen your finger is swiping) shifts vertically
-   between swipes. Centering here keeps that point stable regardless of
-   which photo is showing. */
+/* Fills whatever height .modal-content isn't using for the (in-flow)
+   status line/details sheet below it -- a real box, not just "as tall as
+   the photo wants to be", so a portrait and a landscape photo produce the
+   same-height element and the point on screen your finger is swiping
+   doesn't shift vertically between swipes. The topbar floats over this
+   (see .modal-topbar) rather than sharing flex space with it, so this gets
+   the full column height minus only the stage-status/details rows. */
 .modal-media {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: calc(100vh - 9rem);
+  flex: 1;
+  min-height: 0;
 }
 
+/* width/height: 100% (not auto + max-width/max-height) forces the image's
+   box to exactly fill .modal-media regardless of the photo's own intrinsic
+   size -- a low-res thumbnail (an item not yet republished at the current
+   THUMB_MAX_EDGE, see imaging.py) needs to be scaled *up* to fill the
+   space, and width/height: auto never enlarges past intrinsic size, only
+   shrinks. object-fit: contain is what then reconciles that forced box
+   with the photo's real aspect ratio -- shrinks or grows it as needed,
+   preserving ratio, letterboxing whichever axis doesn't match. This is the
+   one rule that's correct for both an oversized and an undersized photo in
+   any container shape, so no separate portrait/landscape case is needed. */
 .modal-content img {
   display: block;
   width: 100%;
-  max-height: 100%;
-  border-radius: 6px;
+  height: 100%;
   object-fit: contain;
+  border-radius: 6px;
   cursor: pointer;
 }
 

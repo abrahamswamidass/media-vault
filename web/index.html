@@ -53,6 +53,13 @@
     <button id="signin-btn">Sign in with Google</button>
   </div>
   <main id="view" hidden></main>
+  <!-- Fixed, app-wide, not per-view -- shows once you've scrolled down any
+       page far enough that getting back to the top by hand would be
+       annoying (long Browse/Folders/People/Duplicates grids), hidden near
+       the top where it'd have nothing useful to do. -->
+  <button id="scroll-top-btn" class="scroll-top-btn" type="button" hidden aria-label="Scroll to top">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+  </button>
   <script type="module" src="app.js"></script>
 </body>
 </html>

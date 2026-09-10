@@ -28,6 +28,8 @@ let groupsEl = null;
 let loadMoreBtn = null;
 let yearSelect = null;
 
+let monthSelect = null;
+
 let lastDoc = null;
 let exhausted = false;
 let loading = false;
@@ -168,6 +170,35 @@ function populateYearSelect(range) {
   }
 }
 
+// Fixed Jan-Dec — unlike years, months don't depend on what's actually in
+// the library, so this never needs a read to populate.
+function populateMonthSelect() {
+  monthSelect.innerHTML = '<option value="">Whole year</option>';
+  for (let m = 1; m <= 12; m++) {
+    const opt = document.createElement("option");
+    opt.value = String(m);
+    opt.textContent = new Date(2000, m - 1, 1).toLocaleDateString(undefined, { month: "long" });
+    monthSelect.appendChild(opt);
+  }
+}
+
+// Landing on a specific month (instead of "start of year, then Load More
+// through however many months come before it") is what actually saves the
+// Firestore reads — paging from January to reach October otherwise reads
+// and discards 9 months of documents just to arrive there.
+function computeJumpBeforeMtime() {
+  const year = yearSelect.value;
+  if (!year) return null;
+  const month = Number(monthSelect.value) || null;
+  // "<= end of that month/year" (23:59:59 local) so the jump lands on the
+  // most recent item in the chosen period, not before it. Date's own
+  // month rollover (day 0 of the *next* month == the last day of this one)
+  // gets the month-end without hardcoding how many days are in it.
+  return month
+    ? new Date(Number(year), month, 0, 23, 59, 59).getTime() / 1000
+    : new Date(Number(year), 11, 31, 23, 59, 59).getTime() / 1000;
+}
+
 function resetAndLoad() {
   lastDoc = null;
   exhausted = false;
@@ -185,7 +216,10 @@ export function mount(container) {
   root = container;
   root.innerHTML = `
     <div class="browse-toolbar">
-      <label>Jump to <select class="year-jump"><option value="">Newest</option></select></label>
+      <label>Jump to
+        <select class="year-jump"><option value="">Newest</option></select>
+        <select class="month-jump" disabled><option value="">Whole year</option></select>
+      </label>
       <p class="view-status"></p>
     </div>
     <div class="month-groups"></div>
@@ -195,17 +229,22 @@ export function mount(container) {
   groupsEl = root.querySelector(".month-groups");
   loadMoreBtn = root.querySelector(".load-more");
   yearSelect = root.querySelector(".year-jump");
+  monthSelect = root.querySelector(".month-jump");
 
   loadMoreBtn.addEventListener("click", loadPage);
   yearSelect.addEventListener("change", () => {
-    const year = yearSelect.value;
-    // "<= end of that year" (Dec 31, 23:59:59 local) so the jump lands on
-    // the most recent item in the chosen year, not before it.
-    jumpBeforeMtime = year ? new Date(Number(year), 11, 31, 23, 59, 59).getTime() / 1000 : null;
+    monthSelect.value = "";
+    monthSelect.disabled = !yearSelect.value;
+    jumpBeforeMtime = computeJumpBeforeMtime();
+    resetAndLoad();
+  });
+  monthSelect.addEventListener("change", () => {
+    jumpBeforeMtime = computeJumpBeforeMtime();
     resetAndLoad();
   });
 
   jumpBeforeMtime = null;
+  populateMonthSelect();
   resetAndLoad();
   fetchYearRange().then(populateYearSelect).catch((err) => console.error("year range:", err));
 }

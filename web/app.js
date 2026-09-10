@@ -42,6 +42,7 @@ const signinBtn = document.getElementById("signin-btn");
 const signoutBtn = document.getElementById("signout-btn");
 const heartbeatEl = document.getElementById("agent-heartbeat");
 const notifyToggleBtn = document.getElementById("notify-toggle");
+const scrollTopBtn = document.getElementById("scroll-top-btn");
 
 let currentView = null;
 
@@ -51,6 +52,18 @@ signinBtn.addEventListener("click", () => {
   });
 });
 signoutBtn.addEventListener("click", () => signOut(auth));
+
+// App-wide, not per-view — every grid view (Browse, Folders, People,
+// Duplicates) can get long enough that scrolling back up by hand is
+// annoying. Shows once you've scrolled past a threshold, hidden near the
+// top where it'd have nothing useful to do.
+const SCROLL_TOP_THRESHOLD = 400;
+window.addEventListener("scroll", () => {
+  scrollTopBtn.hidden = window.scrollY < SCROLL_TOP_THRESHOLD;
+}, { passive: true });
+scrollTopBtn.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 
 // Hamburger dropdown: closed by default, opened by the toggle button,
 // closed again by picking anything inside it (a tab, Sign out) or by

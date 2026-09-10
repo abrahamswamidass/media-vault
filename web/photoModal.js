@@ -71,6 +71,18 @@ function renderDetails(item) {
   }
 }
 
+// An empty <p> still reserves a line of flex height in .modal-content's
+// column even with no text in it -- that pushed .modal-media (flex: 1) up
+// and left an uneven gap under the photo whenever there was nothing to
+// report. Hiding it whenever there's nothing to say keeps the image
+// centered the rest of the time, only actually taking space while there's
+// a real status to show.
+function setStageStatus(text) {
+  const el = modal.querySelector(".modal-stage-status");
+  el.textContent = text;
+  el.hidden = !text;
+}
+
 function closeMenu() {
   modal.querySelector(".modal-menu").hidden = true;
 }
@@ -125,7 +137,7 @@ function render(item) {
   const fullresBtn = modal.querySelector(".modal-fullres");
   fullresBtn.disabled = false;
   fullresBtn.textContent = "Request full-res";
-  modal.querySelector(".modal-stage-status").textContent = "";
+  setStageStatus("");
   modal.hidden = false;
 }
 
@@ -134,18 +146,17 @@ async function handleFetchFullRes() {
   if (!item) return;
   closeMenu();
   const btn = modal.querySelector(".modal-fullres");
-  const status = modal.querySelector(".modal-stage-status");
   btn.disabled = true;
   btn.textContent = "Requesting…";
   try {
     await fetchFullRes(item);
     btn.textContent = "Requested ✓";
-    status.textContent = "Waiting for the agent to fetch it — enable notifications "
-      + "(header) to be told when it's ready.";
+    setStageStatus("Waiting for the agent to fetch it — enable notifications "
+      + "(header) to be told when it's ready.");
   } catch (err) {
     btn.disabled = false;
     btn.textContent = "Request full-res";
-    status.textContent = `Failed: ${err.message}`;
+    setStageStatus(`Failed: ${err.message}`);
     console.error(item.item_id, err);
   }
 }
@@ -155,17 +166,16 @@ async function handleStageForAmazon() {
   if (!item) return;
   closeMenu();
   const btn = modal.querySelector(".modal-stage-amazon");
-  const status = modal.querySelector(".modal-stage-status");
   btn.disabled = true;
   btn.textContent = "Staging…";
   try {
     await stageForAmazon(item);
     btn.textContent = "Staged ✓";
-    status.textContent = "Waiting for the agent to pick it up — see the Amazon tab.";
+    setStageStatus("Waiting for the agent to pick it up — see the Amazon tab.");
   } catch (err) {
     btn.disabled = false;
     btn.textContent = "Stage for Amazon";
-    status.textContent = `Failed: ${err.message}`;
+    setStageStatus(`Failed: ${err.message}`);
     console.error(item.item_id, err);
   }
 }
