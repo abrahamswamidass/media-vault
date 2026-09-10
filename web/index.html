@@ -23,25 +23,32 @@
 </head>
 <body>
   <header>
+    <!-- Collapsed by default, opened by tapping the hamburger button —
+         replaces the old always-visible tab row. Two groups (library views,
+         then maintenance/status tools) separated by a divider, same as
+         before, just stacked vertically in a dropdown instead of laid out
+         in a row; Sign out lives at the bottom of the same dropdown rather
+         than as its own separate header button. -->
+    <div class="nav-menu-wrap" id="nav-menu-wrap" hidden>
+      <button id="nav-toggle" class="nav-toggle" type="button" aria-label="Menu">&#9776;</button>
+      <nav id="nav" class="nav-menu" hidden>
+        <a href="#browse" data-view="browse">Browse</a>
+        <a href="#map" data-view="map">Map</a>
+        <a href="#folders" data-view="folders">Folders</a>
+        <a href="#people" data-view="people">People</a>
+        <span class="nav-divider"></span>
+        <a href="#duplicates" data-view="duplicates">Duplicates</a>
+        <a href="#amazon" data-view="amazon">Amazon</a>
+        <a href="#activity" data-view="activity">Activity</a>
+        <span class="nav-divider"></span>
+        <button id="signout-btn" type="button">Sign out</button>
+      </nav>
+    </div>
     <h1>Media Vault</h1>
     <p id="status">Loading…</p>
+    <button id="notify-toggle" class="notify-toggle" type="button" hidden aria-label="Enable notifications" title="Enable notifications"></button>
     <div id="agent-heartbeat" class="agent-heartbeat" hidden></div>
-    <button id="notify-toggle" hidden>Enable notifications</button>
-    <button id="signout-btn" hidden>Sign out</button>
   </header>
-  <!-- Two groups, one row: ways to look at the library (Browse/Map/Folders/
-       People) separated by a divider from maintenance/status tools
-       (Duplicates/Amazon/Activity) — same tabs as before, just grouped. -->
-  <nav id="nav" hidden>
-    <a href="#browse" data-view="browse">Browse</a>
-    <a href="#map" data-view="map">Map</a>
-    <a href="#folders" data-view="folders">Folders</a>
-    <a href="#people" data-view="people">People</a>
-    <span class="nav-divider"></span>
-    <a href="#duplicates" data-view="duplicates">Duplicates</a>
-    <a href="#amazon" data-view="amazon">Amazon</a>
-    <a href="#activity" data-view="activity">Activity</a>
-  </nav>
   <div id="signin" hidden>
     <button id="signin-btn">Sign in with Google</button>
   </div>

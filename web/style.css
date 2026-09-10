@@ -6,6 +6,13 @@
 body {
   margin: 0;
   padding: 1.5rem;
+  /* On an installed iOS PWA (see index.html's viewport-fit=cover) there's no
+     browser chrome reserving space for the status bar/notch — plain flow
+     content starts right under it unless something adds that room back.
+     Unlike the photo modal's topbar (see its own comment below), this isn't
+     an overlay guessing an offset — just widening the page's own normal top
+     padding, so it's not subject to the same over/under-correction risk. */
+  padding-top: max(1.5rem, env(safe-area-inset-top));
   background: #111;
   color: #eee;
 }
@@ -13,7 +20,7 @@ body {
 header {
   margin-bottom: 1.5rem;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
 }
@@ -49,37 +56,79 @@ button:hover {
   text-align: center;
 }
 
-nav {
+.nav-menu-wrap {
+  position: relative;
+}
+
+.nav-toggle {
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.5rem 0.7rem;
+}
+
+.notify-toggle {
   display: flex;
-  gap: 0.25rem;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid #333;
-  overflow-x: auto; /* five tabs + a divider can outgrow a phone-width screen */
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
 }
 
-nav a {
-  color: #999;
+/* Anchored under the hamburger button — same [hidden]-vs-equal-specificity
+   fix the photo modal's own dropdown already needed (see .modal-menu):
+   without :not([hidden]), display: flex always wins over the attribute. */
+.nav-menu:not([hidden]) {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.4rem;
+  min-width: 11rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.nav-menu a {
+  color: #ccc;
   text-decoration: none;
-  padding: 0.6rem 1rem;
+  padding: 0.55rem 0.7rem;
   font-size: 0.9rem;
-  border-bottom: 2px solid transparent;
+  border-radius: 6px;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
-nav a:hover {
+.nav-menu a:hover {
+  background: #2a2a2a;
   color: #eee;
 }
 
-nav a.active {
+.nav-menu a.active {
+  background: #2f6fd6;
+  color: #fff;
+}
+
+.nav-menu button {
+  text-align: left;
+  border: none;
+  background: none;
+  color: #ccc;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  border-radius: 6px;
+}
+
+.nav-menu button:hover {
+  background: #2a2a2a;
   color: #eee;
-  border-bottom-color: #eee;
 }
 
 .nav-divider {
-  width: 1px;
-  flex-shrink: 0;
-  margin: 0.6rem 0.5rem;
+  height: 1px;
+  margin: 0.3rem 0.2rem;
   background: #333;
 }
 

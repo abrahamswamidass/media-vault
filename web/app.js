@@ -17,6 +17,15 @@ import * as duplicatesView from "./views/duplicates.js";
 import * as amazonView from "./views/amazon.js";
 import * as activityView from "./views/activity.js";
 
+// Plain stroked outlines (fill: none, stroke: currentColor) instead of the
+// 🔔/🔕 emoji characters — those two render in Apple's full-color emoji
+// font no matter what CSS color says (there's no text-only fallback iOS
+// actually honors here), which clashed hard with the rest of this app's
+// monochrome icon set (the ☰ hamburger, the LED grid). An inline SVG
+// inherits `color` like any other text, so it stays monochrome.
+const BELL_ON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+const BELL_OFF_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
 const VIEWS = {
   browse: browseView, map: mapView, folders: foldersView, people: peopleView,
   duplicates: duplicatesView, amazon: amazonView, activity: activityView,
@@ -24,6 +33,8 @@ const VIEWS = {
 const DEFAULT_VIEW = "browse";
 
 const statusEl = document.getElementById("status");
+const navMenuWrapEl = document.getElementById("nav-menu-wrap");
+const navToggleBtn = document.getElementById("nav-toggle");
 const navEl = document.getElementById("nav");
 const viewEl = document.getElementById("view");
 const signinEl = document.getElementById("signin");
@@ -41,9 +52,27 @@ signinBtn.addEventListener("click", () => {
 });
 signoutBtn.addEventListener("click", () => signOut(auth));
 
+// Hamburger dropdown: closed by default, opened by the toggle button,
+// closed again by picking anything inside it (a tab, Sign out) or by
+// clicking anywhere outside — same interaction shape as the photo modal's
+// own ⋮ "more actions" menu (see photoModal.js), just in the header instead.
+navToggleBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  navEl.hidden = !navEl.hidden;
+});
+navEl.addEventListener("click", () => { navEl.hidden = true; });
+document.addEventListener("click", (e) => {
+  if (!navEl.hidden && !navMenuWrapEl.contains(e.target)) navEl.hidden = true;
+});
+
 async function refreshNotifyToggle() {
-  notifyToggleBtn.textContent = (await push.isSubscribed())
-    ? "Notifications on" : "Enable notifications";
+  const on = await push.isSubscribed();
+  // Icon-only (see index.html) — the label moves to title/aria-label
+  // instead of visible text, same info, just not taking up header space.
+  notifyToggleBtn.innerHTML = on ? BELL_ON_SVG : BELL_OFF_SVG;
+  const label = on ? "Notifications on — tap to disable" : "Enable notifications";
+  notifyToggleBtn.title = label;
+  notifyToggleBtn.setAttribute("aria-label", label);
 }
 
 notifyToggleBtn.addEventListener("click", async () => {
@@ -96,9 +125,9 @@ onAuthStateChanged(auth, (user) => {
   const signedIn = !!user && ALLOWED_EMAILS.includes(user.email);
 
   signinEl.hidden = signedIn;
-  navEl.hidden = !signedIn;
+  navMenuWrapEl.hidden = !signedIn;
+  navEl.hidden = true; // always start collapsed, whether signing in or out
   viewEl.hidden = !signedIn;
-  signoutBtn.hidden = !signedIn;
   heartbeatEl.hidden = !signedIn;
   notifyToggleBtn.hidden = !signedIn || !push.isSupported();
 
