@@ -180,6 +180,12 @@ different situations, all handled the same way:
   file, a future codec) — but re-attempting it is something you ask for
   explicitly now (`unpublish --skipped-only`), not something that
   automatically happens just because `publish` ran again.
+- **Over 300MB** — checked against the catalog's own `size` (known since
+  indexing), *before* `ThumbnailAction`'s unconditional full NAS read.
+  Real content (a DVD-rip `.VOB` chapter commonly runs 500MB-1GB), not
+  junk, so this is a skip, not a "not media" classification — but paying
+  for a full multi-hundred-MB transfer only to then decide not to publish
+  it is exactly the cost this check exists to avoid.
 
 `stats` reports `skipped` as its own column, separate from `published` (a
 subset of `published_at` being set, not double-counted). `unpublish nas

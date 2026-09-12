@@ -29,6 +29,14 @@ from .derive import ThumbnailAction
 #: the full read ThumbnailAction needs for actual pixel decoding.
 _EXIF_HEAD_BYTES = 1_048_576
 
+#: A source video this large (DVD-rip .VOB chapters commonly run 500MB-1GB)
+#: costs a full NAS read before ThumbnailAction ever gets to decoding it --
+#: see _read_decodable()'s unconditional `raw = connector.read(item_id)` --
+#: the exact same cost whether it succeeds or fails. Checked against the
+#: catalog's own `size` column (known since indexing, no NAS read needed),
+#: before ever attempting one, so skipping one of these costs nothing.
+_MAX_PUBLISH_SIZE_BYTES = 300 * 1024 * 1024
+
 
 class IndexAction(Action):
     """Walk one source into the catalog, resuming any interrupted pass."""
@@ -248,6 +256,22 @@ class PublishAction(Action):
             suffix = PurePosixPath(item_id).suffix.lower()
             if suffix not in imaging.MEDIA_EXTENSIONS:
                 reason = f"not a recognized photo/video extension ({suffix or 'none'})"
+                self.catalog.mark_skipped(self.source, item_id, reason)
+                self.catalog.conn.commit()
+                skipped.append({"item_id": item_id, "error": reason})
+                continue
+
+            # Also checked against the catalog's own `size` -- known since
+            # indexing, no NAS read needed -- before ThumbnailAction's
+            # unconditional full read (see _MAX_PUBLISH_SIZE_BYTES). A
+            # multi-hundred-MB-to-1GB DVD-rip .VOB chapter is real content,
+            # not junk, so this is a skip, not a "not media" classification
+            # -- but paying for its full transfer just to decide not to
+            # publish it is exactly the cost this check exists to avoid.
+            size = row["size"] or 0
+            if size > _MAX_PUBLISH_SIZE_BYTES:
+                reason = (f"too large to publish ({size / (1024 * 1024):.0f} MB > "
+                          f"{_MAX_PUBLISH_SIZE_BYTES // (1024 * 1024)} MB)")
                 self.catalog.mark_skipped(self.source, item_id, reason)
                 self.catalog.conn.commit()
                 skipped.append({"item_id": item_id, "error": reason})

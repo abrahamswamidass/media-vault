@@ -298,6 +298,61 @@ def test_thumbnail_key_is_content_addressed_not_path_addressed(nas, catalog, blo
     assert len(thumbs) == 1
 
 
+def test_oversized_video_is_skipped_without_ever_reading_it(nas, catalog, blobs, facts):
+    """A DVD-rip .VOB chapter commonly runs 500MB-1GB -- ThumbnailAction's
+    full NAS read (see derive.py's _read_decodable, an unconditional
+    `connector.read(item_id)` before any decode is even attempted) would
+    cost that whole transfer just to end up skipping it anyway. Checked
+    against the catalog's own `size` -- known since indexing -- before
+    ever calling read(), so an oversized file costs nothing."""
+    (nas / "Photos" / "big.vob").write_bytes(b"not really a gigabyte")
+    conn = _indexed(nas, catalog)
+    catalog.conn.execute(
+        "UPDATE items SET size = ? WHERE source = 'nas' AND item_id = 'Photos/big.vob'",
+        (301 * 1024 * 1024,))
+    catalog.conn.commit()
+
+    original_read = conn.read
+
+    def _guarded_read(item_id, *a, **k):
+        if item_id == "Photos/big.vob":
+            raise AssertionError("connector.read() must never be called for an oversized file")
+        return original_read(item_id, *a, **k)
+    conn.read = _guarded_read
+
+    result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1        # Photos/real.jpg, unaffected
+    assert len(result.outputs["skipped"]) == 1
+    assert result.outputs["skipped"][0]["item_id"] == "Photos/big.vob"
+    assert "too large" in result.outputs["skipped"][0]["error"]
+    assert "301 MB" in result.outputs["skipped"][0]["error"]
+    assert catalog.skipped_count("nas") == 1
+
+    # Must not be retried on a later run either.
+    result2 = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    assert result2.status == STATUS_NOOP
+
+
+def test_file_at_exactly_the_size_limit_is_not_skipped(nas, catalog, blobs, facts):
+    """The boundary itself must still be attempted -- only strictly over
+    the limit is too large."""
+    (nas / "Photos" / "borderline.mp4").write_bytes(b"pretend-video-bytes")
+    conn = _indexed(nas, catalog)
+    catalog.conn.execute(
+        "UPDATE items SET size = ? WHERE source = 'nas' AND item_id = 'Photos/borderline.mp4'",
+        (300 * 1024 * 1024,))
+    catalog.conn.commit()
+
+    calls = []
+    conn.read = lambda *a, **k: (calls.append(1), b"not a real video")[1]
+
+    PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert calls  # read() was actually attempted, not skipped on size alone
+
+
 def test_non_media_extension_is_marked_done_instead_of_retried_forever(nas, catalog, blobs, facts):
     """Regression: a file that isn't a photo/video at all (a Google Takeout
     .json metadata sidecar, or a stray OS file like Thumbs.db that got
