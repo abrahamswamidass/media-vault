@@ -51,3 +51,34 @@ def test_busy_timeout_lets_a_second_writer_wait_instead_of_failing(tmp_path):
     t.join(timeout=5)
 
     assert result.get("ok") is True, result.get("error")
+
+
+def _seed(catalog, item_id, *, published=False, skip_reason=None):
+    catalog.conn.execute(
+        "INSERT INTO items (source, item_id, name, indexed_at, state, published_at, "
+        "skip_reason) VALUES ('nas', ?, ?, 'now', 'active', ?, ?)",
+        (item_id, item_id, "now" if (published or skip_reason) else None, skip_reason),
+    )
+    catalog.conn.commit()
+
+
+def test_publish_stats_reads_published_and_skipped_from_one_query(tmp_path):
+    """Regression: computing these as two separate calls (published_count()
+    then skipped_count(), or vice versa) lets a concurrently-running
+    publish batch make the derived "published" number appear to dip
+    between two reads -- each call sees the table at a slightly different
+    instant, even though no item is ever actually un-published. One query
+    means both numbers always come from the exact same instant."""
+    with Catalog(str(tmp_path / "cat.sqlite")) as catalog:
+        _seed(catalog, "a.jpg", published=True)
+        _seed(catalog, "b.jpg", published=True)
+        _seed(catalog, "sidecar.json", skip_reason="not a recognized photo/video extension")
+        _seed(catalog, "c.jpg")  # not yet published at all
+
+        published, skipped = catalog.publish_stats("nas")
+
+        assert published == 2
+        assert skipped == 1
+        # The two individual methods must still agree with the combined read.
+        assert catalog.published_count("nas") == published + skipped
+        assert catalog.skipped_count("nas") == skipped

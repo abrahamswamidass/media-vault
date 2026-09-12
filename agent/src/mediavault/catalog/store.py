@@ -528,6 +528,25 @@ class Catalog:
             "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "
             "AND skip_reason IS NOT NULL", (source,)).fetchone()[0]
 
+    def publish_stats(self, source: str) -> tuple[int, int]:
+        """(genuinely published, skipped), from one query -- not two calls to
+        published_count()/skipped_count() combined by the caller. With an
+        active publish run as a concurrent writer, two separate reads each
+        see the table at a *different* instant; subtracting one from the
+        other can then show published dipping between two `stats` calls
+        even though no item is ever actually un-published -- a real
+        regression report, not just a cosmetic worry, since a count that
+        can go backwards for no real reason isn't trustworthy. One query
+        means both numbers come from the same instant, always consistent
+        with each other, no matter what else is writing at the same time."""
+        row = self.conn.execute(
+            "SELECT "
+            "  COALESCE(SUM(CASE WHEN published_at IS NOT NULL AND skip_reason IS NULL "
+            "                    THEN 1 ELSE 0 END), 0) AS published, "
+            "  COALESCE(SUM(CASE WHEN skip_reason IS NOT NULL THEN 1 ELSE 0 END), 0) AS skipped "
+            "FROM items WHERE source = ? AND state = 'active'", (source,)).fetchone()
+        return row["published"], row["skipped"]
+
     def cold_archived_count(self, source: str) -> int:
         return self.conn.execute(
             "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "

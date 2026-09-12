@@ -486,17 +486,19 @@ def cmd_stats(args) -> int:
 
         rows = []
         for source in sources:
-            # published_count() counts every row with published_at set --
-            # skipped items set it too (see mark_skipped()), so it's
-            # subtracted out here to keep "published" meaning "actually
-            # published" in this table, with "skipped" broken out
-            # separately instead of silently folded into it.
-            skipped = catalog.skipped_count(source)
+            # One query for both numbers (see publish_stats()) -- reading
+            # published_count() and skipped_count() as two separate calls
+            # let an actively-running publish batch (a concurrent writer)
+            # make "published" appear to dip between two `stats` calls,
+            # since each call would see the table at a slightly different
+            # instant. Nothing was ever actually un-published; the numbers
+            # just weren't reads of the same moment.
+            published, skipped = catalog.publish_stats(source)
             rows.append({
                 "source": source,
                 "indexed": catalog.count(source),
                 "archived": catalog.count(source, state="archived"),
-                "published": catalog.published_count(source) - skipped,
+                "published": published,
                 "skipped": skipped,
                 "cold_archived": catalog.cold_archived_count(source),
                 "duplicate_groups": len(catalog.duplicate_groups(source)),
