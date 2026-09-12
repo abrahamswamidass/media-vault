@@ -32,6 +32,18 @@ _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 3
 
 
+class ShortRead(OSError):
+    """read() returned fewer bytes than the file actually has.
+
+    A degraded connection mid-transfer can hand back a truncated buffer
+    without smbclient itself ever raising -- observed downstream as
+    Pillow's "broken data stream when reading image file" on a photo
+    that's actually fine on the NAS. Retried the same as a dropped session
+    (see _is_retryable_smb_error) rather than treated as real file
+    corruption or a permanently-undecodable file.
+    """
+
+
 def _is_retryable_smb_error(exc: BaseException) -> bool:
     import smbprotocol.exceptions as smb_exc  # lazy — only needed on this path
 
@@ -42,6 +54,7 @@ def _is_retryable_smb_error(exc: BaseException) -> bool:
         ConnectionAbortedError,
         BrokenPipeError,
         TimeoutError,
+        ShortRead,
     ]
     try:
         # A dropped session sometimes surfaces as smbclient's own internal
@@ -248,7 +261,19 @@ class SMBNASConnector(Connector):
 
     def _read_once(self, unc: str, nbytes: int) -> bytes:
         with self._smb.open_file(unc, mode="rb") as f:
-            return f.read() if nbytes <= 0 else f.read(nbytes)
+            if nbytes > 0:
+                return f.read(nbytes)  # a bounded head-read; a short one is expected/fine
+            data = f.read()
+            # Compare against the file's own reported size, from the same
+            # already-open handle (no extra round trip) -- a degraded
+            # connection can otherwise hand back a truncated read without
+            # ever raising, silently passing bad bytes upstream to whatever
+            # decodes them (see ShortRead's own docstring).
+            f.seek(0, 2)
+            expected = f.tell()
+            if len(data) != expected:
+                raise ShortRead(f"got {len(data)} of {expected} expected bytes for {unc}")
+            return data
 
     def read_chunks(self, item_id: str, chunk_size: int = 8 * 1024 * 1024) -> Iterable[bytes]:
         """Stream instead of read()'s single whole-file call — see ports.py's

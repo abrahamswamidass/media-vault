@@ -282,6 +282,13 @@ def test_upload_dry_run_writes_nothing(fake_smbclient_writable, tmp_path):
 # no traceback, since that isn't a catchable Python exception.
 # --------------------------------------------------------------------------- #
 class _FakeReadableFile:
+    #: A full read() (no/negative size) returns only this many bytes when
+    #: set, regardless of how much data is actually behind it -- simulates
+    #: a degraded connection silently truncating a transfer. seek()/tell()
+    #: still report the real, full length either way, same as a real SMB
+    #: file handle would (the file's metadata is unaffected by a bad read).
+    short_read_bytes: int | None = None
+
     def __init__(self, data: bytes):
         self._data = data
         self._pos = 0
@@ -294,12 +301,25 @@ class _FakeReadableFile:
 
     def read(self, n: int = -1) -> bytes:
         if n is None or n < 0:
-            chunk = self._data[self._pos:]
-            self._pos = len(self._data)
+            end = self.short_read_bytes if self.short_read_bytes is not None else len(self._data)
+            chunk = self._data[self._pos:end]
+            self._pos = end
         else:
             chunk = self._data[self._pos:self._pos + n]
             self._pos += len(chunk)
         return chunk
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == 2:
+            self._pos = len(self._data) + offset
+        elif whence == 1:
+            self._pos += offset
+        else:
+            self._pos = offset
+        return self._pos
+
+    def tell(self) -> int:
+        return self._pos
 
 
 @pytest.fixture
@@ -332,3 +352,69 @@ def test_read_chunks_handles_a_file_not_evenly_divisible_by_chunk_size(fake_smbc
 
     assert b"".join(chunks) == data
     assert [len(c) for c in chunks] == [1000, 1000, 500]
+
+
+# --------------------------------------------------------------------------- #
+# read()'s ShortRead guard -- a degraded connection can hand back fewer
+# bytes than the file actually has, on a full read(), without smbclient
+# itself ever raising. Downstream this looked like Pillow's "broken data
+# stream when reading image file" on an otherwise fine photo.
+# --------------------------------------------------------------------------- #
+def test_read_succeeds_on_a_normal_full_read(fake_smbclient_readable):
+    fake, store = fake_smbclient_readable
+    conn = _connector(fake, root="")
+    data = b"hello world" * 50
+    store[conn._to_unc("img.jpg")] = data
+
+    assert conn.read("img.jpg") == data
+
+
+def test_read_with_nbytes_is_not_subject_to_the_length_check(fake_smbclient_readable):
+    """A bounded head-read (nbytes > 0, used for EXIF) is *expected* to
+    return less than the whole file -- only a full read() gets the
+    length check."""
+    fake, store = fake_smbclient_readable
+    conn = _connector(fake, root="")
+    data = b"x" * 1000
+    store[conn._to_unc("img.jpg")] = data
+
+    assert conn.read("img.jpg", nbytes=10) == data[:10]
+
+
+def test_read_retries_and_recovers_from_a_short_full_read(fake_smbclient, monkeypatch):
+    monkeypatch.setattr(nas_smb, "_RETRY_DELAY_SECONDS", 0)
+    conn = _connector(fake_smbclient, root="")
+    data = b"x" * 100
+    attempts = {"n": 0}
+
+    def make_fake(unc, mode):
+        attempts["n"] += 1
+        f = _FakeReadableFile(data)
+        if attempts["n"] == 1:
+            f.short_read_bytes = 50  # first attempt: truncated
+        return f
+
+    fake_smbclient.open_file = make_fake
+    monkeypatch.setattr(conn, "_reconnect", lambda: None)
+
+    out = conn.read("img.jpg")
+
+    assert out == data
+    assert attempts["n"] == 2  # short on attempt 1, reconnected, succeeded on attempt 2
+
+
+def test_read_raises_short_read_when_truncation_never_recovers(fake_smbclient, monkeypatch):
+    monkeypatch.setattr(nas_smb, "_RETRY_DELAY_SECONDS", 0)
+    conn = _connector(fake_smbclient, root="")
+    data = b"x" * 100
+
+    def make_fake(unc, mode):
+        f = _FakeReadableFile(data)
+        f.short_read_bytes = 50
+        return f
+
+    fake_smbclient.open_file = make_fake
+    monkeypatch.setattr(conn, "_reconnect", lambda: None)
+
+    with pytest.raises(nas_smb.ShortRead):
+        conn.read("img.jpg")
