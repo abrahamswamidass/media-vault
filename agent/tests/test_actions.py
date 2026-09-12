@@ -224,6 +224,34 @@ def test_archive_item_marks_the_catalog_row_archived(nas, facts, catalog):
     assert row["state"] == "archived"
 
 
+def test_archive_item_survives_a_catalog_bookkeeping_failure(nas, facts, catalog):
+    """Regression: the fact is gone and the file is already safely in trash
+    by the time the catalog gets touched -- the two mutations that actually
+    matter to the web module. A failure in that last, purely-local
+    bookkeeping step (simulated here by closing the connection early, same
+    as a lock-contention error would surface) must not report the whole
+    delete as failed: since an intent never auto-retries once marked
+    failed (see intents.py), that used to be a *permanent* misleading
+    "Failed" in the web module's Activity tab for a delete that had
+    actually succeeded -- and a catalog row stuck at state='active'
+    forever, which is exactly what made a later `publish` pass try to
+    re-read a file this action itself had already moved.
+
+    Not swallowed silently, though -- recorded in outputs so a recurring
+    catalog problem is still visible in the journal, just not fatal to the
+    delete itself."""
+    facts.put("nas", "Photos/junk.jpg", {"source": "nas", "item_id": "Photos/junk.jpg"})
+    _insert_active_item(catalog, "nas", "Photos/junk.jpg")
+    catalog.conn.close()  # any catalog write from here on raises
+
+    result = ArchiveItemAction("Photos/junk.jpg", nas, facts, catalog=catalog).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert not (nas.root / "Photos" / "junk.jpg").exists()
+    assert "catalog_sync_error" in result.outputs
+    assert (nas.trash / "Photos" / "junk.jpg").exists()
+
+
 def test_restore_marks_the_catalog_row_active_again(nas, catalog):
     DeleteAction("Photos/junk.jpg", nas).run(commit=True)
     _insert_active_item(catalog, "nas", "Photos/junk.jpg")

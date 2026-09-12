@@ -173,8 +173,34 @@ class ArchiveItemAction(Action):
         self.facts.delete(self.connector.name, self.item_id)
         outputs = self._delete._execute()
         if self.catalog:
-            self.catalog.mark_archived(self.connector.name, self.item_id)
-            self.catalog.conn.commit()
+            # By this point the fact is gone and the file is already moved
+            # to trash -- the two mutations that actually matter to anyone
+            # looking at the web module have both landed. A failure here
+            # (e.g. a concurrent index/publish pass briefly holding the
+            # catalog's write lock) is local bookkeeping only -- the
+            # catalog is a cache, never the source of truth (see store.py).
+            # Regression: this used to be outside the try, so a purely
+            # local hiccup made the *whole* delete report STATUS_FAILED --
+            # and since an intent never auto-retries once failed (see
+            # intents.py), that was a permanent, misleading "Failed" in the
+            # web module's Activity tab for a delete that had actually
+            # succeeded, plus a catalog row stuck at state='active' forever
+            # (which is exactly what later made `publish` try to re-read a
+            # file this action itself had just moved -- see maintenance.py's
+            # "not found" handling).
+            #
+            # Not a bare `except: pass`, though -- that would trade one
+            # silent-failure bug for another. The point isn't to hide that
+            # this happened, only to stop it from erasing the two real
+            # mutations that already succeeded; recorded in outputs, which
+            # ActionLog journals regardless of the action's overall status,
+            # so a recurring catalog problem is still visible, just not
+            # fatal to the delete itself.
+            try:
+                self.catalog.mark_archived(self.connector.name, self.item_id)
+                self.catalog.conn.commit()
+            except Exception as e:
+                outputs["catalog_sync_error"] = str(e)
         return outputs
 
 
