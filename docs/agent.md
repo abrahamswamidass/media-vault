@@ -27,7 +27,7 @@ what each command actually touches.
 | `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
 | `reset --all --commit` | Same, for every source. |
 | `unpublish nas [--commit]` | Clear `published_at` for one source only — quick_hash/EXIF/phash/faces/cold_archived_at are all left untouched, no full re-index needed. For when thumbnails need a fresh pass over the whole source (e.g. a GCS bucket prefix got emptied by hand) but nothing else about these items is wrong. A plain `publish` afterward (no `--force`) walks everything again on its own; thumbnails still there are found via their content-addressed key and skipped, not re-derived. |
-| `unpublish nas --skipped-only --commit` | Same, but only for items `publish` gave up on for good (see `stats`'s `skipped` column) — every genuine publish stays untouched. For after fixing a bad "not a photo/video" classification, so just the wrongly-skipped items get a real attempt. |
+| `unpublish nas --skipped-only --commit` | Same, but only for items `publish` gave up on (see `stats`'s `skipped` column) — every genuine publish stays untouched. `publish` never auto-retries a skipped item for any reason (not media, gone from the NAS, a decode failure); this is the only way to make it try again, once you've addressed whatever caused it. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
 | `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
 | `nas restore "<path>" --commit` | Undo a soft delete — move a file back out of trash to where it came from. Works on `drive` too (clears Drive's own trashed flag). What the web Activity tab's Undo button asks for behind the scenes. |
@@ -155,42 +155,39 @@ for anything shorter. If `ffmpeg` is ever missing from the image, a video
 fails publish with a clear "ffmpeg is not installed" error rather than
 Pillow's unhelpful "cannot identify image file."
 
-**A file that isn't a photo/video at all is marked done, not retried
-forever.** `index` skips known OS/filesystem housekeeping files by name
-(`Thumbs.db`, `desktop.ini`, `.DS_Store`, `.nomedia`) so they never become
-catalog items in the first place, but anything indexed before that filter
-existed — or any other non-media file, e.g. a Google Takeout `.json`
-metadata sidecar (Takeout writes one per photo) or an old iTunes backup's
-cache files — used to fail every single `publish` run identically forever
-(only a successful publish marks an item done). `publish` now checks an
-item's extension *before* ever attempting a thumbnail: a recognized
-photo/video extension always gets a real attempt (see `imaging.MEDIA_EXTENSIONS`
-for the list — deliberately generous on raw/video formats, since a camera
-RAW format Pillow can't decode without an extra library is still a real
-photo, not junk); anything else is marked done immediately, with no NAS
-read at all, reported separately in `stats` and in `publish`'s own output as
-"skipped" (with a sample of item_ids, same as `failed` already shows) so
-it's clear nothing was actually published for it.
+**Explicit policy: once `publish` gives up on an item for any reason, it is
+never auto-retried — only on a deliberate
+`unpublish nas --skipped-only --commit`.** Every item lands in exactly one
+of two buckets: `published`, or `skipped` (with a reason). There is no
+third "failed, silently retried next time" outcome. This covers several
+different situations, all handled the same way:
 
-**This is deliberately extension-based, not "did Pillow fail to open it"**
-— an earlier version of this check used the latter and silently gave up
-forever on real camera RAW files (`.cr2`, `.dng`) and some `.webp` photos,
-since Pillow can't decode those without a library this build doesn't have
-(the same situation HEIC was in before `pillow-heif` got registered) —
-indistinguishable, from a bare decode failure, from a file that was never
-a photo to begin with. A file with a recognized extension that still fails
-to decode lands in `failed` instead — visible, retried on the next run,
-never silently dropped. If a classification like this ever needs
-correcting again, `unpublish nas --skipped-only --commit` clears
-*only* the items marked skipped (not genuine publishes) so they get a real
-attempt next time — see `mark_skipped()`/`skip_reason` in `store.py`.
+- **Not a photo/video at all**, by extension — a Google Takeout `.json`
+  metadata sidecar (Takeout writes one per photo), an old iTunes backup's
+  cache files, or a stray `Thumbs.db`/`desktop.ini`/`.DS_Store`/`.nomedia`
+  indexed before `index`'s own by-name filter existed (see scanner.py's
+  `_JUNK_NAMES`, which now stops these from ever becoming catalog items in
+  the first place). Checked by extension *before* ever touching the NAS —
+  see `imaging.MEDIA_EXTENSIONS` for the recognized list.
+- **Gone from the NAS since it was indexed** — the catalog is a cache, not
+  the source of truth (see `store.py`'s own docstring); a file deleted or
+  moved since the last `index` pass (via the web module's delete/archive,
+  or by hand) won't reappear at its old path no matter how many times
+  `publish` asks. A future re-index is what would notice a path change.
+- **A recognized photo/video extension that still fails to decode** —
+  real corruption, a raw/video format this build can't open without an
+  extra library, or any other error. Might well be fixable (re-copy a good
+  file, a future codec) — but re-attempting it is something you ask for
+  explicitly now (`unpublish --skipped-only`), not something that
+  automatically happens just because `publish` ran again.
 
-**A file gone from the NAS since it was indexed is skipped the same way**
-— the catalog is a cache, not the source of truth (see `store.py`'s own
-docstring), and a photo deleted or moved since the last `index` pass (e.g.
-via the web module's own delete/archive, or by hand) will never magically
-reappear at its old path no matter how many times `publish` asks. A future
-re-index is what would notice a path change, not a repeated `publish` run.
+`stats` reports `skipped` as its own column, separate from `published` (a
+subset of `published_at` being set, not double-counted). `unpublish nas
+--skipped-only --commit` clears *only* the items marked skipped (not
+genuine publishes), making them eligible for a real attempt again — see
+`mark_skipped()`/`skip_reason`/`reset_skipped()` in `store.py`. There's no
+"give it a few tries first" grace period: the very first failure sticks,
+by design, until you say otherwise.
 
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates, video duration, and shooting

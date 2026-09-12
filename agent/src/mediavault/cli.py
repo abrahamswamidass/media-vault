@@ -384,20 +384,14 @@ def cmd_publish(args) -> int:
                   f"(thumbnails -> {blobs.name}, metadata -> {facts.name}).")
             skipped = result.outputs.get("skipped") or []
             if skipped:
-                print(f"{len(skipped)} item(s) skipped for good -- not actually a photo/video "
-                      f"(e.g. a stray Thumbs.db/.DS_Store, a Google Takeout .json metadata "
-                      f"sidecar) or gone from the NAS since indexing -- won't be retried:")
+                print(f"{len(skipped)} item(s) skipped -- won't be retried until you "
+                      f"explicitly run `unpublish {args.source} --skipped-only --commit` "
+                      f"(not actually a photo/video, gone from the NAS since indexing, "
+                      f"or failed and left for you to review):")
                 for s in skipped[:10]:
                     print(f"  - {s['item_id']}: {s['error']}")
                 if len(skipped) > 10:
                     print(f"  ... and {len(skipped) - 10} more (see the journal for all of them).")
-            failed = result.outputs.get("failed") or []
-            if failed:
-                print(f"{len(failed)} item(s) failed:")
-                for f in failed[:10]:
-                    print(f"  ! {f['item_id']}: {f['error']}")
-                if len(failed) > 10:
-                    print(f"  ... and {len(failed) - 10} more (see the journal for all of them).")
         elif not args.commit and result.status == "ok":
             _banner(False)
         return 0 if result.status != "failed" else 1
@@ -977,10 +971,10 @@ def _maybe_run_scheduled_publish(args, catalog) -> None:
         result = PublishAction(source, connector, catalog, blobs, facts).run(commit=True)
         detail = result.detail
         if result.status == "ok":
-            failed = result.outputs.get("failed") or []
+            skipped = result.outputs.get("skipped") or []
             detail = f"published {result.outputs.get('published', 0)} item(s)"
-            if failed:
-                detail += f", {len(failed)} failed"
+            if skipped:
+                detail += f", {len(skipped)} skipped"
         print(f"  publish: {detail}")
         catalog.mark_scheduled_run(schedule_name, detail=detail)
     except Exception as e:

@@ -317,7 +317,6 @@ def test_non_media_extension_is_marked_done_instead_of_retried_forever(nas, cata
     assert result.outputs["published"] == 1        # Photos/real.jpg, unaffected
     assert len(result.outputs["skipped"]) == 1
     assert result.outputs["skipped"][0]["item_id"] == "Photos/real.jpg.supplemental-metadata.json"
-    assert result.outputs["failed"] == []
     assert catalog.published_count("nas") == 2      # marked done either way
     assert catalog.skipped_count("nas") == 1
     # Skipped means "no thumbnail was ever derived", not "silently forgotten".
@@ -348,7 +347,6 @@ def test_file_gone_from_nas_since_indexing_is_marked_skipped_not_retried(nas, ca
     assert len(result.outputs["skipped"]) == 1
     assert result.outputs["skipped"][0]["item_id"] == "Photos/gone.jpg"
     assert "not found" in result.outputs["skipped"][0]["error"]
-    assert result.outputs["failed"] == []
     assert catalog.skipped_count("nas") == 1
 
     # Must not be retried on a later run.
@@ -356,13 +354,15 @@ def test_file_gone_from_nas_since_indexing_is_marked_skipped_not_retried(nas, ca
     assert result2.status == STATUS_NOOP
 
 
-def test_undecodable_but_recognized_extension_stays_retriable(nas, catalog, blobs, facts):
-    """A real photo/video extension that fails to decode (corruption, or a
-    raw camera format this build can't open without an extra library) must
-    NOT be silently given up on the way a non-media extension is -- it
-    should land in `failed`, visible and retried on the next run, since
-    unlike a .json sidecar it really might just need a fix (a codec, an
-    un-corrupted re-copy) to eventually succeed."""
+def test_undecodable_file_is_skipped_and_never_auto_retried(nas, catalog, blobs, facts):
+    """Explicit policy: once publish gives up on an item for any reason --
+    including a real photo/video extension that just fails to decode
+    (corruption, or a raw format this build can't open) -- it's never
+    auto-retried, only on a deliberate `unpublish --skipped-only --commit`.
+    A decode failure might well be transient (fixable by re-copying a good
+    file, or by a future codec fix), but re-attempting it is something
+    asked for explicitly now, not something that happens on its own just
+    because publish ran again."""
     (nas / "Photos" / "corrupt.jpg").write_bytes(b"not actually a jpeg")
     conn = _indexed(nas, catalog)
 
@@ -370,19 +370,19 @@ def test_undecodable_but_recognized_extension_stays_retriable(nas, catalog, blob
 
     assert result.status == STATUS_OK
     assert result.outputs["published"] == 1     # Photos/real.jpg, unaffected
-    assert result.outputs["skipped"] == []
-    assert len(result.outputs["failed"]) == 1
-    assert result.outputs["failed"][0]["item_id"] == "Photos/corrupt.jpg"
-    assert catalog.skipped_count("nas") == 0
-    assert catalog.published_count("nas") == 1  # NOT marked done
+    assert len(result.outputs["skipped"]) == 1
+    assert result.outputs["skipped"][0]["item_id"] == "Photos/corrupt.jpg"
+    assert catalog.skipped_count("nas") == 1
+    assert catalog.published_count("nas") == 2  # marked done either way
 
-    # Must still be retried on the next run, unlike the skipped case above
-    # -- a total failure is a NoOp (see test_all_items_failing_surfaces_a_
-    # real_reason_not_a_generic_noop), so the retry itself shows up in the
-    # detail message rather than outputs.
+    # Must NOT be retried on a later run.
     result2 = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
     assert result2.status == STATUS_NOOP
-    assert "Photos/corrupt.jpg" in result2.detail
+
+    # Explicitly clearing it is what makes it eligible again.
+    catalog.reset_skipped("nas")
+    assert catalog.skipped_count("nas") == 0
+    assert [r["item_id"] for r in catalog.unpublished("nas")] == ["Photos/corrupt.jpg"]
 
 
 def test_unindexed_item_without_hash_is_skipped(nas, catalog, blobs, facts):
@@ -398,11 +398,13 @@ def test_unindexed_item_without_hash_is_skipped(nas, catalog, blobs, facts):
     assert catalog.published_count("nas") == 0
 
 
-def test_all_items_failing_surfaces_a_real_reason_not_a_generic_noop(nas, catalog, blobs):
-    """Regression: a total failure used to collapse into the same generic
-    "no items could be published" message as a legitimate no-op, discarding
-    every per-item error — no way to tell "nothing to do" from "everything
-    broke" without digging into code neither the CLI nor caller can reach."""
+def test_all_items_failing_is_real_committed_work_not_a_noop(nas, catalog, blobs):
+    """Every item that fails now gets marked skipped (see mark_skipped()) --
+    a total failure is real, committed catalog work (every item now
+    carries a skip_reason it didn't have before), not a no-op. This also
+    means the reason is never lost: it used to only surface via a NoOp's
+    detail message (discarded by Action.run() on every other path); now
+    it's in outputs["skipped"], available regardless of status."""
     conn = _indexed(nas, catalog)
 
     class BrokenFacts:
@@ -412,9 +414,15 @@ def test_all_items_failing_surfaces_a_real_reason_not_a_generic_noop(nas, catalo
 
     result = PublishAction("nas", conn, catalog, blobs, BrokenFacts()).run(commit=True)
 
-    assert result.status == STATUS_NOOP
-    assert "1 failed" in result.detail
-    assert "Firestore permission denied" in result.detail
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 0
+    assert len(result.outputs["skipped"]) == 1
+    assert "Firestore permission denied" in result.outputs["skipped"][0]["error"]
+    assert catalog.skipped_count("nas") == 1
+
+    # And it must not be retried on a later run either.
+    result2 = PublishAction("nas", conn, catalog, blobs, BrokenFacts()).run(commit=True)
+    assert result2.status == STATUS_NOOP
 
 
 def test_missing_source_index_fails_validation(tmp_path, catalog, blobs, facts):
@@ -496,7 +504,7 @@ def test_cli_prints_the_actual_reason_a_vanished_item_was_skipped(tmp_path, caps
     out = capsys.readouterr().out
     assert exit_code == 0  # a partial result isn't a command failure
     assert "Published 1 item(s)" in out
-    assert "1 item(s) skipped for good" in out
+    assert "1 item(s) skipped" in out
     # NASConnector's error message embeds the item's own path, which is
     # legitimately OS-native (a real filesystem-facing string, unlike
     # item_id elsewhere) -- backslashes on Windows. Normalize before

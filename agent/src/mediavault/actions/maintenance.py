@@ -225,7 +225,17 @@ class PublishAction(Action):
         if not self._pending:
             raise NoOp(f"nothing to publish in {self.source}")
 
-        published, failed, skipped = [], [], []
+        # Every item lands in exactly one bucket, published or skipped --
+        # there is no third, ephemeral "failed, silently retried next time"
+        # outcome. Explicit policy: once publish gives up on an item for
+        # any reason, it stays given up on (excluded from unpublished(),
+        # see mark_skipped()) until a deliberate
+        # `unpublish --skipped-only --commit`, never automatically. A
+        # decode error might well be transient (a network hiccup, a file
+        # that gets fixed later) -- but re-attempting it is now something
+        # asked for explicitly, not something that just happens on the
+        # next publish run whether wanted or not.
+        published, skipped = [], []
         for row in self._pending:
             item_id = row["item_id"]
 
@@ -234,12 +244,7 @@ class PublishAction(Action):
             # isn't a decode failure worth retrying (a Google Takeout
             # .json metadata sidecar, an old Thumbs.db indexed before
             # scanner.py's _JUNK_NAMES existed, an iTunes backup's cache
-            # files, ...). Deliberately NOT based on whether Pillow can
-            # actually decode the bytes -- that conflated "not a photo"
-            # with "a photo in a format this build can't decode yet" (a
-            # raw camera file, say), silently and permanently giving up on
-            # real photos instead of leaving them to retry. See
-            # imaging.MEDIA_EXTENSIONS and Catalog.mark_skipped().
+            # files, ...). See imaging.MEDIA_EXTENSIONS.
             suffix = PurePosixPath(item_id).suffix.lower()
             if suffix not in imaging.MEDIA_EXTENSIONS:
                 reason = f"not a recognized photo/video extension ({suffix or 'none'})"
@@ -252,22 +257,9 @@ class PublishAction(Action):
                 thumb_action = ThumbnailAction(item_id, self.connector, self.blobs)
                 thumb = thumb_action.run(commit=True)
                 if thumb.status == "failed":
-                    if thumb.error and thumb.error.startswith("not found: "):
-                        # The file's simply gone from the NAS now -- most
-                        # often a web-module delete/archive from since the
-                        # last index (the catalog is a cache, the NAS is
-                        # truth; see store.py's own docstring), sometimes a
-                        # manual move/rename. Either way, retrying a fixed
-                        # path forever won't make it reappear -- a future
-                        # re-index is what would notice it's back, if it
-                        # ever is. Marked skipped, not failed, for the same
-                        # reason a non-media extension is: nothing here
-                        # will change on its own by asking again.
-                        self.catalog.mark_skipped(self.source, item_id, thumb.error)
-                        self.catalog.conn.commit()
-                        skipped.append({"item_id": item_id, "error": thumb.error})
-                    else:
-                        failed.append({"item_id": item_id, "error": thumb.error})
+                    self.catalog.mark_skipped(self.source, item_id, thumb.error)
+                    self.catalog.conn.commit()
+                    skipped.append({"item_id": item_id, "error": thumb.error})
                     continue
                 # A "no-op" thumbnail (already stored) has no outputs — the key is
                 # deterministic from the hash, so recompute it rather than skip.
@@ -430,20 +422,12 @@ class PublishAction(Action):
                 self.catalog.conn.commit()
                 published.append(item_id)
             except Exception as e:
-                failed.append({"item_id": item_id, "error": str(e)})
+                self.catalog.mark_skipped(self.source, item_id, str(e))
+                self.catalog.conn.commit()
+                skipped.append({"item_id": item_id, "error": str(e)})
 
-        if not published and not skipped:
-            # A NoOp's outputs never reach the caller (Action.run() discards
-            # them on this path) — without surfacing at least one real reason
-            # here, "every item failed" and "nothing needed doing" print the
-            # exact same message, with no way to tell which happened.
-            if failed:
-                sample = failed[0]
-                raise NoOp(f"no items could be published — {len(failed)} failed, "
-                          f"e.g. {sample['item_id']}: {sample['error']}")
-            raise NoOp("no items could be published")
-        # Skipped items did mutate the catalog (mark_published, so they stop
-        # being retried) even though nothing was actually published for
-        # them — the `not published and not skipped` check above is what
-        # keeps that real work from being misreported as the no-op case.
-        return {"published": len(published), "failed": failed, "skipped": skipped}
+        # Every item in `_pending` (non-empty, checked above) lands in
+        # exactly one of these two lists, so this is never a no-op: even a
+        # 100%-skipped run is real, committed work (every one of those
+        # items now carries a skip_reason it didn't have before).
+        return {"published": len(published), "skipped": skipped}
