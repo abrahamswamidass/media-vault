@@ -44,19 +44,28 @@ class VideoFrameUnavailable(RuntimeError):
     """ffmpeg isn't installed, or couldn't pull a frame from this file."""
 
 
-class UndecodableMedia(RuntimeError):
-    """The bytes aren't a decodable image at all -- not a corrupt photo or a
-    missing codec, just not an image (a folder-thumbnail-cache file indexed
-    before the scanner started filtering it out, a truncated download,
-    similar). Unlike ImagingUnavailable (install Pillow and it works) or a
-    video's own VideoFrameUnavailable, retrying this changes nothing --
-    PublishAction matches on UNDECODABLE_PREFIX to tell "will never succeed"
-    apart from every other failure and stop retrying instead of re-failing
-    on the same item forever."""
-
-
-#: See UndecodableMedia's docstring for who reads this and why.
-UNDECODABLE_PREFIX = "not a decodable image: "
+# Recognized photo/video extensions -- PublishAction checks an item's
+# extension against this *before* ever attempting a thumbnail, to decide
+# whether a decode failure means "not actually a photo/video, stop asking"
+# (a Google Takeout .json metadata sidecar, an old Thumbs.db, an iTunes
+# backup's .ithmb cache, ...) or "this should be media but isn't decoding"
+# (worth retrying/surfacing as failed -- a raw camera format Pillow can't
+# open without an extra library, a truncated download, real corruption).
+# Deliberately generous on the video/raw side: better to keep retrying a
+# format this build genuinely can't decode yet than to silently and
+# permanently give up on someone's real photo because Pillow doesn't
+# recognize it *today*. See CLAUDE.md's dedup rules for why "give up
+# quietly" is the wrong default for anything that might be a real memory.
+IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp",
+    ".heic", ".heif", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf",
+    ".orf", ".rw2", ".pef", ".srw", ".raw", ".thm",
+}
+VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".m4v", ".avi", ".mkv", ".wmv", ".3gp", ".3g2",
+    ".mts", ".m2ts", ".vob", ".mpg", ".mpeg", ".flv", ".webm",
+}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
 _heif_registered = False
@@ -102,14 +111,9 @@ def downscale(data: bytes, max_edge: int, fmt: str = "WEBP", quality: int = 82) 
     image is upright and carries no location metadata into the cloud.
     """
     Image = _pillow()
-    from PIL import ImageOps, UnidentifiedImageError
+    from PIL import ImageOps
 
-    try:
-        opened = Image.open(io.BytesIO(data))
-    except UnidentifiedImageError as e:
-        raise UndecodableMedia(f"{UNDECODABLE_PREFIX}{e}") from e
-
-    with opened as im:
+    with Image.open(io.BytesIO(data)) as im:
         im = ImageOps.exif_transpose(im)          # bake in rotation, then forget it
         im.thumbnail((max_edge, max_edge), Image.LANCZOS)   # no-ops if already smaller
         if fmt.upper() in {"JPEG", "WEBP"} and im.mode not in {"RGB", "L"}:

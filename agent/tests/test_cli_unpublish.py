@@ -13,11 +13,13 @@ from mediavault.catalog import Catalog
 from mediavault.cli import main
 
 
-def _seed_item(catalog, source, item_id, *, published=True, indexed_at="2020-01-01"):
+def _seed_item(catalog, source, item_id, *, published=True, indexed_at="2020-01-01",
+                skip_reason=None):
     catalog.conn.execute(
-        "INSERT INTO items (source, item_id, name, quick_hash, indexed_at, published_at) "
-        "VALUES (?, ?, ?, 'hash', ?, ?)",
-        (source, item_id, item_id, indexed_at, "2020-01-02" if published else None),
+        "INSERT INTO items (source, item_id, name, quick_hash, indexed_at, published_at, "
+        "skip_reason) VALUES (?, ?, ?, 'hash', ?, ?, ?)",
+        (source, item_id, item_id, indexed_at,
+         "2020-01-02" if (published or skip_reason) else None, skip_reason),
     )
     catalog.conn.commit()
 
@@ -80,6 +82,43 @@ def test_already_unpublished_items_are_unaffected(tmp_path):
 
     with Catalog(db) as catalog:
         assert catalog.published_count("nas") == 0  # was already 0, stays 0
+
+
+# --------------------------------------------------------------------------- #
+# --skipped-only
+# --------------------------------------------------------------------------- #
+def test_skipped_only_clears_only_skipped_items(tmp_path):
+    """The reprocess path for a bad "not a photo/video" classification (like
+    the .cr2/.webp one this was built for) -- a genuine publish must be left
+    completely untouched."""
+    db = str(tmp_path / "cat.sqlite")
+    with Catalog(db) as catalog:
+        _seed_item(catalog, "nas", "real.jpg")                      # a real publish
+        _seed_item(catalog, "nas", "sidecar.json", skip_reason="not a recognized extension")
+
+    assert main(["unpublish", "nas", "--db", db, "--skipped-only", "--commit"]) == 0
+
+    with Catalog(db) as catalog:
+        assert catalog.published_count("nas") == 1        # real.jpg untouched
+        assert catalog.skipped_count("nas") == 0           # sidecar.json reset
+        pending = [r["item_id"] for r in catalog.unpublished("nas")]
+        assert pending == ["sidecar.json"]
+        row = catalog.conn.execute(
+            "SELECT skip_reason FROM items WHERE item_id = 'sidecar.json'").fetchone()
+        assert row["skip_reason"] is None
+
+
+def test_skipped_only_dry_run_reports_the_skipped_count_not_published(tmp_path):
+    db = str(tmp_path / "cat.sqlite")
+    with Catalog(db) as catalog:
+        _seed_item(catalog, "nas", "real.jpg")
+        _seed_item(catalog, "nas", "sidecar.json", skip_reason="not a recognized extension")
+
+    assert main(["unpublish", "nas", "--db", db, "--skipped-only"]) == 0
+
+    with Catalog(db) as catalog:
+        assert catalog.published_count("nas") == 2  # untouched -- dry run
+        assert catalog.skipped_count("nas") == 1     # untouched -- dry run
 
 
 # --------------------------------------------------------------------------- #

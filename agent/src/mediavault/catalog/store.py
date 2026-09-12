@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS items (
     flash       TEXT,
     phash       TEXT,
     cold_archived_at TEXT,
+    -- Set only by PublishAction's "not a recognized photo/video extension"
+    -- path, alongside published_at -- see mark_skipped(). Lets a skipped
+    -- item (a Google Takeout .json sidecar, an old Thumbs.db, ...) be told
+    -- apart from a real publish directly, instead of published_at alone
+    -- having to mean two different things.
+    skip_reason TEXT,
     PRIMARY KEY (source, item_id)
 );
 
@@ -169,6 +175,7 @@ class Catalog:
             "ALTER TABLE items ADD COLUMN flash TEXT",
             "ALTER TABLE items ADD COLUMN phash TEXT",
             "ALTER TABLE items ADD COLUMN cold_archived_at TEXT",
+            "ALTER TABLE items ADD COLUMN skip_reason TEXT",
             "ALTER TABLE schedules ADD COLUMN detail TEXT",
         ):
             try:
@@ -325,6 +332,20 @@ class Catalog:
             (_now(), source, item_id),
         )
 
+    def mark_skipped(self, source: str, item_id: str, reason: str) -> None:
+        """Flag an item as permanently not worth (re)trying -- not a photo or
+        video at all (see PublishAction's extension check), so nothing was
+        ever published for it. Sets published_at too, same as
+        mark_published(), so it's excluded from unpublished() the same
+        way -- but skip_reason is what makes it possible to tell these two
+        apart afterward (see reset_skipped()), rather than published_at
+        alone having to mean both "really published" and "gave up on this"."""
+        self.conn.execute(
+            "UPDATE items SET published_at = ?, skip_reason = ? "
+            "WHERE source = ? AND item_id = ?",
+            (_now(), reason, source, item_id),
+        )
+
     def set_exif(self, source: str, item_id: str, exif: dict) -> None:
         """Record EXIF fields pulled from the file (see metadata.py). Missing
         fields (most photos have partial or no EXIF) just store NULL."""
@@ -427,6 +448,20 @@ class Catalog:
                 "UPDATE items SET published_at = NULL WHERE source = ? AND state = 'active'",
                 (source,)).rowcount
 
+    def reset_skipped(self, source: str) -> int:
+        """Clear published_at + skip_reason for every item mark_skipped()
+        touched in one source -- the reprocess path for when the "not a
+        recognized photo/video extension" classification itself changes
+        (a new format gets support, or a bug like this one gets fixed) and
+        items given up on before should get a real attempt now. Only
+        touches rows with skip_reason set -- a genuine, successful publish
+        is never affected."""
+        with self.transaction() as c:
+            return c.execute(
+                "UPDATE items SET published_at = NULL, skip_reason = NULL "
+                "WHERE source = ? AND state = 'active' AND skip_reason IS NOT NULL",
+                (source,)).rowcount
+
     def reset_people(self) -> dict:
         """Wipe every detected face and person cluster. Never touches items,
         scans, or anything published — items keep their `published_at`, so a
@@ -483,6 +518,15 @@ class Catalog:
         return self.conn.execute(
             "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "
             "AND published_at IS NOT NULL", (source,)).fetchone()[0]
+
+    def skipped_count(self, source: str) -> int:
+        """Items marked done via mark_skipped() -- not actually published,
+        just never worth (re)trying. A subset of published_count(), not
+        separate from it (published_at is set either way); see
+        mark_skipped()'s docstring for why."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM items WHERE source = ? AND state = 'active' "
+            "AND skip_reason IS NOT NULL", (source,)).fetchone()[0]
 
     def cold_archived_count(self, source: str) -> int:
         return self.conn.execute(

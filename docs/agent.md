@@ -27,6 +27,7 @@ what each command actually touches.
 | `reset nas [--commit]` | Wipe the local catalog for one source, to re-index from scratch. Add `--purge-facts` when widening the scan root. |
 | `reset --all --commit` | Same, for every source. |
 | `unpublish nas [--commit]` | Clear `published_at` for one source only — quick_hash/EXIF/phash/faces/cold_archived_at are all left untouched, no full re-index needed. For when thumbnails need a fresh pass over the whole source (e.g. a GCS bucket prefix got emptied by hand) but nothing else about these items is wrong. A plain `publish` afterward (no `--force`) walks everything again on its own; thumbnails still there are found via their content-addressed key and skipped, not re-derived. |
+| `unpublish nas --skipped-only --commit` | Same, but only for items `publish` gave up on for good (see `stats`'s `skipped` column) — every genuine publish stays untouched. For after fixing a bad "not a photo/video" classification, so just the wrongly-skipped items get a real attempt. |
 | `amazon-stage "<path>" --source nas --commit` | Stage a file straight off the NAS for Amazon Photos, no local copy needed. |
 | `amazon upload /path/to/file --commit` | Stage a file that's already on the container's own filesystem. |
 | `nas restore "<path>" --commit` | Undo a soft delete — move a file back out of trash to where it came from. Works on `drive` too (clears Drive's own trashed flag). What the web Activity tab's Undo button asks for behind the scenes. |
@@ -154,17 +155,35 @@ for anything shorter. If `ffmpeg` is ever missing from the image, a video
 fails publish with a clear "ffmpeg is not installed" error rather than
 Pillow's unhelpful "cannot identify image file."
 
-**A file that will never decode as an image is marked done, not retried
+**A file that isn't a photo/video at all is marked done, not retried
 forever.** `index` skips known OS/filesystem housekeeping files by name
 (`Thumbs.db`, `desktop.ini`, `.DS_Store`, `.nomedia`) so they never become
 catalog items in the first place, but anything indexed before that filter
-existed — or any other file Pillow can't identify at all, e.g. a Google
-Takeout `.json` metadata sidecar (Takeout writes one per photo) or a
-corrupted download — used to fail every single `publish` run identically
-forever (only a successful publish marks an item done). It's now marked
-done with no thumbnail/fact, reported separately as "skipped" (with a
-sample of which item_ids, same as `failed` already shows) so it's clear
-nothing was actually published for it, and never seen by `publish` again.
+existed — or any other non-media file, e.g. a Google Takeout `.json`
+metadata sidecar (Takeout writes one per photo) or an old iTunes backup's
+cache files — used to fail every single `publish` run identically forever
+(only a successful publish marks an item done). `publish` now checks an
+item's extension *before* ever attempting a thumbnail: a recognized
+photo/video extension always gets a real attempt (see `imaging.MEDIA_EXTENSIONS`
+for the list — deliberately generous on raw/video formats, since a camera
+RAW format Pillow can't decode without an extra library is still a real
+photo, not junk); anything else is marked done immediately, with no NAS
+read at all, reported separately in `stats` and in `publish`'s own output as
+"skipped" (with a sample of item_ids, same as `failed` already shows) so
+it's clear nothing was actually published for it.
+
+**This is deliberately extension-based, not "did Pillow fail to open it"**
+— an earlier version of this check used the latter and silently gave up
+forever on real camera RAW files (`.cr2`, `.dng`) and some `.webp` photos,
+since Pillow can't decode those without a library this build doesn't have
+(the same situation HEIC was in before `pillow-heif` got registered) —
+indistinguishable, from a bare decode failure, from a file that was never
+a photo to begin with. A file with a recognized extension that still fails
+to decode lands in `failed` instead — visible, retried on the next run,
+never silently dropped. If a classification like this ever needs
+correcting again, `unpublish nas --skipped-only --commit` clears
+*only* the items marked skipped (not genuine publishes) so they get a real
+attempt next time — see `mark_skipped()`/`skip_reason` in `store.py`.
 
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates, video duration, and shooting

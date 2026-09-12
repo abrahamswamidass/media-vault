@@ -298,26 +298,28 @@ def test_thumbnail_key_is_content_addressed_not_path_addressed(nas, catalog, blo
     assert len(thumbs) == 1
 
 
-def test_undecodable_file_is_marked_done_instead_of_retried_forever(nas, catalog, blobs, facts):
-    """Regression: a file that will never decode as an image (a corrupted
-    download, or a stray OS file like Thumbs.db that got indexed before the
-    scanner started filtering those out -- see scanner.py's _JUNK_NAMES)
-    used to stay unpublished forever, since only a successful publish marks
-    an item done. Every future publish run re-attempted it and re-failed,
-    permanently wasting a slot in every batch. It should instead be marked
-    done (no thumbnail/fact -- there's nothing to publish) so it's counted
-    once, as "skipped", and never seen by publish again."""
-    (nas / "Photos" / "corrupt.jpg").write_bytes(b"not actually a jpeg")
+def test_non_media_extension_is_marked_done_instead_of_retried_forever(nas, catalog, blobs, facts):
+    """Regression: a file that isn't a photo/video at all (a Google Takeout
+    .json metadata sidecar, or a stray OS file like Thumbs.db that got
+    indexed before the scanner started filtering those out -- see
+    scanner.py's _JUNK_NAMES) used to stay unpublished forever, since only a
+    successful publish marks an item done. Every future publish run
+    re-attempted it and re-failed, permanently wasting a slot in every
+    batch. It should instead be marked done (no thumbnail/fact -- there's
+    nothing to publish) so it's counted once, as "skipped", and never seen
+    by publish again -- decided by extension, before ever touching the NAS."""
+    (nas / "Photos" / "real.jpg.supplemental-metadata.json").write_bytes(b'{"not": "a photo"}')
     conn = _indexed(nas, catalog)
 
     result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
 
     assert result.status == STATUS_OK
     assert result.outputs["published"] == 1        # Photos/real.jpg, unaffected
-    assert len(result.outputs["skipped"]) == 1      # Photos/corrupt.jpg
-    assert result.outputs["skipped"][0]["item_id"] == "Photos/corrupt.jpg"
+    assert len(result.outputs["skipped"]) == 1
+    assert result.outputs["skipped"][0]["item_id"] == "Photos/real.jpg.supplemental-metadata.json"
     assert result.outputs["failed"] == []
     assert catalog.published_count("nas") == 2      # marked done either way
+    assert catalog.skipped_count("nas") == 1
     # Skipped means "no thumbnail was ever derived", not "silently forgotten".
     thumbs = list((blobs.root / "thumbs").iterdir())
     assert len(thumbs) == 1
@@ -326,6 +328,35 @@ def test_undecodable_file_is_marked_done_instead_of_retried_forever(nas, catalog
     # fixed: re-running publish used to re-attempt (and re-fail on) it.
     result2 = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
     assert result2.status == STATUS_NOOP
+
+
+def test_undecodable_but_recognized_extension_stays_retriable(nas, catalog, blobs, facts):
+    """A real photo/video extension that fails to decode (corruption, or a
+    raw camera format this build can't open without an extra library) must
+    NOT be silently given up on the way a non-media extension is -- it
+    should land in `failed`, visible and retried on the next run, since
+    unlike a .json sidecar it really might just need a fix (a codec, an
+    un-corrupted re-copy) to eventually succeed."""
+    (nas / "Photos" / "corrupt.jpg").write_bytes(b"not actually a jpeg")
+    conn = _indexed(nas, catalog)
+
+    result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1     # Photos/real.jpg, unaffected
+    assert result.outputs["skipped"] == []
+    assert len(result.outputs["failed"]) == 1
+    assert result.outputs["failed"][0]["item_id"] == "Photos/corrupt.jpg"
+    assert catalog.skipped_count("nas") == 0
+    assert catalog.published_count("nas") == 1  # NOT marked done
+
+    # Must still be retried on the next run, unlike the skipped case above
+    # -- a total failure is a NoOp (see test_all_items_failing_surfaces_a_
+    # real_reason_not_a_generic_noop), so the retry itself shows up in the
+    # detail message rather than outputs.
+    result2 = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    assert result2.status == STATUS_NOOP
+    assert "Photos/corrupt.jpg" in result2.detail
 
 
 def test_unindexed_item_without_hash_is_skipped(nas, catalog, blobs, facts):

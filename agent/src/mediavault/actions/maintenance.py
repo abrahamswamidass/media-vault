@@ -228,23 +228,31 @@ class PublishAction(Action):
         published, failed, skipped = [], [], []
         for row in self._pending:
             item_id = row["item_id"]
+
+            # Extension-based, checked *before* ever touching the NAS --
+            # not a recognized photo/video extension at all means this
+            # isn't a decode failure worth retrying (a Google Takeout
+            # .json metadata sidecar, an old Thumbs.db indexed before
+            # scanner.py's _JUNK_NAMES existed, an iTunes backup's cache
+            # files, ...). Deliberately NOT based on whether Pillow can
+            # actually decode the bytes -- that conflated "not a photo"
+            # with "a photo in a format this build can't decode yet" (a
+            # raw camera file, say), silently and permanently giving up on
+            # real photos instead of leaving them to retry. See
+            # imaging.MEDIA_EXTENSIONS and Catalog.mark_skipped().
+            suffix = PurePosixPath(item_id).suffix.lower()
+            if suffix not in imaging.MEDIA_EXTENSIONS:
+                reason = f"not a recognized photo/video extension ({suffix or 'none'})"
+                self.catalog.mark_skipped(self.source, item_id, reason)
+                self.catalog.conn.commit()
+                skipped.append({"item_id": item_id, "error": reason})
+                continue
+
             try:
                 thumb_action = ThumbnailAction(item_id, self.connector, self.blobs)
                 thumb = thumb_action.run(commit=True)
                 if thumb.status == "failed":
-                    if thumb.error and thumb.error.startswith(imaging.UNDECODABLE_PREFIX):
-                        # Not a photo/video at all -- e.g. a Thumbs.db that was
-                        # already in the catalog before the scanner started
-                        # filtering that out (see scanner.py's _JUNK_NAMES).
-                        # Retrying changes nothing, so mark it done instead of
-                        # re-failing on it every single publish run forever.
-                        # No thumbnail/fact for it -- there's nothing real to
-                        # publish, just a reason to stop asking.
-                        self.catalog.mark_published(self.source, item_id)
-                        self.catalog.conn.commit()
-                        skipped.append({"item_id": item_id, "error": thumb.error})
-                    else:
-                        failed.append({"item_id": item_id, "error": thumb.error})
+                    failed.append({"item_id": item_id, "error": thumb.error})
                     continue
                 # A "no-op" thumbnail (already stored) has no outputs — the key is
                 # deterministic from the hash, so recompute it rather than skip.

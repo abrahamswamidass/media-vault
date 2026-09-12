@@ -486,11 +486,18 @@ def cmd_stats(args) -> int:
 
         rows = []
         for source in sources:
+            # published_count() counts every row with published_at set --
+            # skipped items set it too (see mark_skipped()), so it's
+            # subtracted out here to keep "published" meaning "actually
+            # published" in this table, with "skipped" broken out
+            # separately instead of silently folded into it.
+            skipped = catalog.skipped_count(source)
             rows.append({
                 "source": source,
                 "indexed": catalog.count(source),
                 "archived": catalog.count(source, state="archived"),
-                "published": catalog.published_count(source),
+                "published": catalog.published_count(source) - skipped,
+                "skipped": skipped,
                 "cold_archived": catalog.cold_archived_count(source),
                 "duplicate_groups": len(catalog.duplicate_groups(source)),
                 "reclaimable_bytes": catalog.wasted_bytes(source),
@@ -501,10 +508,10 @@ def cmd_stats(args) -> int:
             return 0
 
         print(f"{'source':10} {'indexed':>10} {'archived':>10} {'published':>10} "
-              f"{'cold-arch':>10} {'dup groups':>12} {'reclaimable':>13}")
+              f"{'skipped':>10} {'cold-arch':>10} {'dup groups':>12} {'reclaimable':>13}")
         for r in rows:
             print(f"{r['source']:10} {r['indexed']:>10,} {r['archived']:>10,} "
-                  f"{r['published']:>10,} {r['cold_archived']:>10,} "
+                  f"{r['published']:>10,} {r['skipped']:>10,} {r['cold_archived']:>10,} "
                   f"{r['duplicate_groups']:>12,} {_human(r['reclaimable_bytes']):>13}")
         return 0
 
@@ -673,24 +680,36 @@ def cmd_unpublish(args) -> int:
     (no --force needed) walks every item again on its own; content-addressed
     thumbnails that are still there are found via ThumbnailAction's own
     exists() check and skipped, not re-derived.
+
+    --skipped-only narrows this to just the items mark_skipped() gave up on
+    (see PublishAction) -- for when the "not a recognized photo/video
+    extension" classification itself changes (a new format gains support, or
+    a bad classification like the .cr2/.webp one gets fixed) and only those
+    items should get a real attempt again, leaving every genuine publish
+    untouched.
     """
     with _catalog(args) as catalog:
-        n = catalog.published_count(args.source)
+        n = catalog.skipped_count(args.source) if args.skipped_only \
+            else catalog.published_count(args.source)
 
         if not args.commit:
             if args.json:
-                _emit({"source": args.source, "published_rows": n, "committed": False}, True)
+                _emit({"source": args.source, "published_rows": n,
+                       "skipped_only": args.skipped_only, "committed": False}, True)
             else:
-                print(f"DRY-RUN (no change): would clear published_at on {n:,} "
+                what = "skipped" if args.skipped_only else "published_at on"
+                print(f"DRY-RUN (no change): would clear {what} {n:,} "
                       f"item(s) for '{args.source}'. quick_hash/EXIF/phash/faces/"
                       "cold_archived_at are all left untouched.")
                 print("Re-run with --commit to apply.")
             return 0
 
-        cleared = catalog.reset_published(args.source)
+        cleared = catalog.reset_skipped(args.source) if args.skipped_only \
+            else catalog.reset_published(args.source)
 
         if args.json:
-            _emit({"source": args.source, "published_cleared": cleared, "committed": True}, True)
+            _emit({"source": args.source, "published_cleared": cleared,
+                   "skipped_only": args.skipped_only, "committed": True}, True)
             return 0
 
         _banner(True)
@@ -1376,6 +1395,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "still there are found and skipped, not re-derived.")
     up.add_argument("source", choices=CONNECTORS, help="source to unpublish")
     up.add_argument("--db", help="catalog database path")
+    up.add_argument("--skipped-only", action="store_true",
+                    help="only clear items publish gave up on for good (see `stats`'s "
+                         "skipped column) -- every genuine publish is left untouched")
     up.add_argument("--commit", action="store_true",
                     help="ACTUALLY clear published_at (default: preview only)")
     up.set_defaults(_fn=cmd_unpublish)
