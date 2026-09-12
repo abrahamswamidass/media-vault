@@ -185,6 +185,13 @@ correcting again, `unpublish nas --skipped-only --commit` clears
 *only* the items marked skipped (not genuine publishes) so they get a real
 attempt next time — see `mark_skipped()`/`skip_reason` in `store.py`.
 
+**A file gone from the NAS since it was indexed is skipped the same way**
+— the catalog is a cache, not the source of truth (see `store.py`'s own
+docstring), and a photo deleted or moved since the last `index` pass (e.g.
+via the web module's own delete/archive, or by hand) will never magically
+reappear at its old path no matter how many times `publish` asks. A future
+re-index is what would notice a path change, not a repeated `publish` run.
+
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates, video duration, and shooting
 settings — aperture, shutter speed, ISO, exposure compensation, focal length

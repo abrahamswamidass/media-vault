@@ -384,11 +384,11 @@ def cmd_publish(args) -> int:
                   f"(thumbnails -> {blobs.name}, metadata -> {facts.name}).")
             skipped = result.outputs.get("skipped") or []
             if skipped:
-                print(f"{len(skipped)} item(s) skipped for good: not actually a photo/video "
-                      f"(e.g. a stray Thumbs.db/.DS_Store, or a Google Takeout .json "
-                      f"metadata sidecar) -- won't be retried. Sample:")
+                print(f"{len(skipped)} item(s) skipped for good -- not actually a photo/video "
+                      f"(e.g. a stray Thumbs.db/.DS_Store, a Google Takeout .json metadata "
+                      f"sidecar) or gone from the NAS since indexing -- won't be retried:")
                 for s in skipped[:10]:
-                    print(f"  - {s['item_id']}")
+                    print(f"  - {s['item_id']}: {s['error']}")
                 if len(skipped) > 10:
                     print(f"  ... and {len(skipped) - 10} more (see the journal for all of them).")
             failed = result.outputs.get("failed") or []

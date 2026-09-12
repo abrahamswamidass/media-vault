@@ -330,6 +330,32 @@ def test_non_media_extension_is_marked_done_instead_of_retried_forever(nas, cata
     assert result2.status == STATUS_NOOP
 
 
+def test_file_gone_from_nas_since_indexing_is_marked_skipped_not_retried(nas, catalog, blobs, facts):
+    """The catalog is a cache, not the source of truth (see store.py's own
+    docstring) -- a file present at index time can be gone by the time
+    publish runs (deleted via the web module, moved, renamed by hand).
+    Retrying a fixed path forever won't make it reappear, so this is
+    skipped like a non-media extension is, not left to fail every run --
+    a future re-index is what would notice it either way."""
+    (nas / "Photos" / "gone.jpg").write_bytes(_jpeg_bytes())
+    conn = _indexed(nas, catalog)
+    (nas / "Photos" / "gone.jpg").unlink()  # gone by the time publish actually runs
+
+    result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1        # Photos/real.jpg, unaffected
+    assert len(result.outputs["skipped"]) == 1
+    assert result.outputs["skipped"][0]["item_id"] == "Photos/gone.jpg"
+    assert "not found" in result.outputs["skipped"][0]["error"]
+    assert result.outputs["failed"] == []
+    assert catalog.skipped_count("nas") == 1
+
+    # Must not be retried on a later run.
+    result2 = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    assert result2.status == STATUS_NOOP
+
+
 def test_undecodable_but_recognized_extension_stays_retriable(nas, catalog, blobs, facts):
     """A real photo/video extension that fails to decode (corruption, or a
     raw camera format this build can't open without an extra library) must
@@ -441,10 +467,14 @@ def test_purge_facts_all_sources(nas, catalog, blobs, facts):
     assert list(facts.root.glob("*.json")) == []
 
 
-def test_cli_prints_the_actual_reason_for_a_partial_failure(tmp_path, capsys):
-    """Regression: a partial failure (some items published, some not) only
+def test_cli_prints_the_actual_reason_a_vanished_item_was_skipped(tmp_path, capsys):
+    """Regression: a partial result (some items published, some not) only
     ever printed a bare count — "N item(s) failed — see the journal" — with
-    no way to see why short of digging through the action log by hand."""
+    no way to see why short of digging through the action log by hand. A
+    file gone from the NAS since indexing (deleted via the web module,
+    moved, renamed by hand) is classified "skipped" (see PublishAction),
+    not "failed" -- retrying a fixed path forever won't make it reappear --
+    but the same "don't just print a bare count" principle applies to it."""
     from mediavault.cli import main
 
     nas = tmp_path / "nas"
@@ -464,9 +494,9 @@ def test_cli_prints_the_actual_reason_for_a_partial_failure(tmp_path, capsys):
     ])
 
     out = capsys.readouterr().out
-    assert exit_code == 0  # a partial failure isn't a command failure
+    assert exit_code == 0  # a partial result isn't a command failure
     assert "Published 1 item(s)" in out
-    assert "1 item(s) failed:" in out
+    assert "1 item(s) skipped for good" in out
     # NASConnector's error message embeds the item's own path, which is
     # legitimately OS-native (a real filesystem-facing string, unlike
     # item_id elsewhere) -- backslashes on Windows. Normalize before

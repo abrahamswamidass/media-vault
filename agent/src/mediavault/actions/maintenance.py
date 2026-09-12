@@ -252,7 +252,22 @@ class PublishAction(Action):
                 thumb_action = ThumbnailAction(item_id, self.connector, self.blobs)
                 thumb = thumb_action.run(commit=True)
                 if thumb.status == "failed":
-                    failed.append({"item_id": item_id, "error": thumb.error})
+                    if thumb.error and thumb.error.startswith("not found: "):
+                        # The file's simply gone from the NAS now -- most
+                        # often a web-module delete/archive from since the
+                        # last index (the catalog is a cache, the NAS is
+                        # truth; see store.py's own docstring), sometimes a
+                        # manual move/rename. Either way, retrying a fixed
+                        # path forever won't make it reappear -- a future
+                        # re-index is what would notice it's back, if it
+                        # ever is. Marked skipped, not failed, for the same
+                        # reason a non-media extension is: nothing here
+                        # will change on its own by asking again.
+                        self.catalog.mark_skipped(self.source, item_id, thumb.error)
+                        self.catalog.conn.commit()
+                        skipped.append({"item_id": item_id, "error": thumb.error})
+                    else:
+                        failed.append({"item_id": item_id, "error": thumb.error})
                     continue
                 # A "no-op" thumbnail (already stored) has no outputs — the key is
                 # deterministic from the hash, so recompute it rather than skip.
