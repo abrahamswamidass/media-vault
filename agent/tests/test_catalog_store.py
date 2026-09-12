@@ -82,3 +82,23 @@ def test_publish_stats_reads_published_and_skipped_from_one_query(tmp_path):
         # The two individual methods must still agree with the combined read.
         assert catalog.published_count("nas") == published + skipped
         assert catalog.skipped_count("nas") == skipped
+
+
+def test_mark_published_clears_a_stale_skip_reason(tmp_path):
+    """Regression: an item previously skipped, then made eligible again by
+    a plain `unpublish` (not --skipped-only, which clears published_at for
+    the whole source without touching skip_reason), and then genuinely
+    published on a later run -- must not keep reporting as "skipped"
+    forever. Nothing else ever clears skip_reason once set, so
+    mark_published() has to."""
+    with Catalog(str(tmp_path / "cat.sqlite")) as catalog:
+        _seed(catalog, "a.jpg", skip_reason="cannot identify image file")
+
+        catalog.mark_published("nas", "a.jpg")
+
+        row = catalog.get("nas", "a.jpg")
+        assert row["skip_reason"] is None
+        assert row["published_at"] is not None
+        published, skipped = catalog.publish_stats("nas")
+        assert published == 1
+        assert skipped == 0

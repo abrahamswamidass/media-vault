@@ -326,9 +326,19 @@ class Catalog:
 
     def mark_published(self, source: str, item_id: str) -> None:
         """Flag an item as published (thumbnail + facts pushed). Re-run-proof:
-        a later publish pass only looks at rows still missing this."""
+        a later publish pass only looks at rows still missing this.
+
+        Also clears skip_reason. Reachable path: an item gets skipped (see
+        mark_skipped()), a plain `unpublish` (not --skipped-only) clears
+        published_at for the whole source without touching skip_reason,
+        and the item then genuinely succeeds on the next publish run --
+        without this, skip_reason would stay stale and publish_stats()
+        would keep reporting a real success as "skipped" forever, since
+        nothing else ever clears it.
+        """
         self.conn.execute(
-            "UPDATE items SET published_at = ? WHERE source = ? AND item_id = ?",
+            "UPDATE items SET published_at = ?, skip_reason = NULL "
+            "WHERE source = ? AND item_id = ?",
             (_now(), source, item_id),
         )
 
