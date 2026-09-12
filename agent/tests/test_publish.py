@@ -673,12 +673,24 @@ def test_faces_field_carries_the_detector_score_from_a_fresh_detection(
 
 
 def test_faces_field_bbox_is_null_without_known_image_dimensions(
-        nas, catalog, blobs, facts):
-    """No EXIF (no fake_exiftool fixture here, so extraction yields {}) ->
-    no width/height to normalize against -> bbox stays null rather than a
+        nas, catalog, blobs, facts, fake_exiftool):
+    """exiftool ran but found no width/height tags for this file -> no
+    dimensions to normalize against -> bbox stays null rather than a
     meaningless or wrong fraction. Still publishes the person_id either way
-    -- a missing crop hint should never block the rest of publishing."""
+    -- a missing crop hint should never block the rest of publishing.
+
+    Regression: this used to rely on *not* using fake_exiftool at all, on
+    the assumption that the real exiftool binary would be absent from
+    whatever environment ran the test and extraction would fail outright.
+    That's true in CI's plain Python environment, but false inside the
+    actual agent Docker image, which bakes exiftool in -- there, real
+    extraction succeeds and finds this fixture JPEG's real dimensions
+    (every JPEG carries its own width/height, independent of camera EXIF
+    tags), and the test failed. Mocking exiftool's result explicitly, the
+    same way every sibling test in this file does, makes this deterministic
+    regardless of whether the real binary happens to be installed."""
     import json
+    fake_exiftool["result"] = [{}]  # ran, but nothing came back -- no dimension tags
     conn = _indexed(nas, catalog)
     catalog.add_face("nas", "Photos/real.jpg", (80.0, 60.0, 240.0, 180.0), 0.9, b"\x00" * 4, 1)
 
