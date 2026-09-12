@@ -382,11 +382,15 @@ def cmd_publish(args) -> int:
             _banner(True)
             print(f"Published {result.outputs.get('published', 0)} item(s) "
                   f"(thumbnails -> {blobs.name}, metadata -> {facts.name}).")
-            skipped = result.outputs.get("skipped", 0)
+            skipped = result.outputs.get("skipped") or []
             if skipped:
-                print(f"{skipped} item(s) skipped for good: not actually a photo/video "
-                      f"(e.g. a stray Thumbs.db/.DS_Store indexed before the scanner "
-                      f"started filtering those out) -- won't be retried.")
+                print(f"{len(skipped)} item(s) skipped for good: not actually a photo/video "
+                      f"(e.g. a stray Thumbs.db/.DS_Store, or a Google Takeout .json "
+                      f"metadata sidecar) -- won't be retried. Sample:")
+                for s in skipped[:10]:
+                    print(f"  - {s['item_id']}")
+                if len(skipped) > 10:
+                    print(f"  ... and {len(skipped) - 10} more (see the journal for all of them).")
             failed = result.outputs.get("failed") or []
             if failed:
                 print(f"{len(failed)} item(s) failed:")

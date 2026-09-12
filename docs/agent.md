@@ -158,11 +158,13 @@ Pillow's unhelpful "cannot identify image file."
 forever.** `index` skips known OS/filesystem housekeeping files by name
 (`Thumbs.db`, `desktop.ini`, `.DS_Store`, `.nomedia`) so they never become
 catalog items in the first place, but anything indexed before that filter
-existed — or any other file Pillow can't identify at all, e.g. a corrupted
-download — used to fail every single `publish` run identically forever
-(only a successful publish marks an item done). It's now marked done with no
-thumbnail/fact, reported separately as "skipped" so it's clear nothing was
-actually published for it, and never seen by `publish` again.
+existed — or any other file Pillow can't identify at all, e.g. a Google
+Takeout `.json` metadata sidecar (Takeout writes one per photo) or a
+corrupted download — used to fail every single `publish` run identically
+forever (only a successful publish marks an item done). It's now marked
+done with no thumbnail/fact, reported separately as "skipped" (with a
+sample of which item_ids, same as `failed` already shows) so it's clear
+nothing was actually published for it, and never seen by `publish` again.
 
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates, video duration, and shooting

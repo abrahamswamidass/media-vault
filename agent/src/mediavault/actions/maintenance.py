@@ -242,7 +242,7 @@ class PublishAction(Action):
                         # publish, just a reason to stop asking.
                         self.catalog.mark_published(self.source, item_id)
                         self.catalog.conn.commit()
-                        skipped.append(item_id)
+                        skipped.append({"item_id": item_id, "error": thumb.error})
                     else:
                         failed.append({"item_id": item_id, "error": thumb.error})
                     continue
@@ -423,4 +423,4 @@ class PublishAction(Action):
         # being retried) even though nothing was actually published for
         # them — the `not published and not skipped` check above is what
         # keeps that real work from being misreported as the no-op case.
-        return {"published": len(published), "failed": failed, "skipped": len(skipped)}
+        return {"published": len(published), "failed": failed, "skipped": skipped}

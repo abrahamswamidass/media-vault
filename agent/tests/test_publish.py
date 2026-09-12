@@ -314,7 +314,8 @@ def test_undecodable_file_is_marked_done_instead_of_retried_forever(nas, catalog
 
     assert result.status == STATUS_OK
     assert result.outputs["published"] == 1        # Photos/real.jpg, unaffected
-    assert result.outputs["skipped"] == 1           # Photos/corrupt.jpg
+    assert len(result.outputs["skipped"]) == 1      # Photos/corrupt.jpg
+    assert result.outputs["skipped"][0]["item_id"] == "Photos/corrupt.jpg"
     assert result.outputs["failed"] == []
     assert catalog.published_count("nas") == 2      # marked done either way
     # Skipped means "no thumbnail was ever derived", not "silently forgotten".
