@@ -382,6 +382,11 @@ def cmd_publish(args) -> int:
             _banner(True)
             print(f"Published {result.outputs.get('published', 0)} item(s) "
                   f"(thumbnails -> {blobs.name}, metadata -> {facts.name}).")
+            skipped = result.outputs.get("skipped", 0)
+            if skipped:
+                print(f"{skipped} item(s) skipped for good: not actually a photo/video "
+                      f"(e.g. a stray Thumbs.db/.DS_Store indexed before the scanner "
+                      f"started filtering those out) -- won't be retried.")
             failed = result.outputs.get("failed") or []
             if failed:
                 print(f"{len(failed)} item(s) failed:")

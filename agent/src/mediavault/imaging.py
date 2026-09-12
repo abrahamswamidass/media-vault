@@ -44,6 +44,21 @@ class VideoFrameUnavailable(RuntimeError):
     """ffmpeg isn't installed, or couldn't pull a frame from this file."""
 
 
+class UndecodableMedia(RuntimeError):
+    """The bytes aren't a decodable image at all -- not a corrupt photo or a
+    missing codec, just not an image (a folder-thumbnail-cache file indexed
+    before the scanner started filtering it out, a truncated download,
+    similar). Unlike ImagingUnavailable (install Pillow and it works) or a
+    video's own VideoFrameUnavailable, retrying this changes nothing --
+    PublishAction matches on UNDECODABLE_PREFIX to tell "will never succeed"
+    apart from every other failure and stop retrying instead of re-failing
+    on the same item forever."""
+
+
+#: See UndecodableMedia's docstring for who reads this and why.
+UNDECODABLE_PREFIX = "not a decodable image: "
+
+
 _heif_registered = False
 
 
@@ -87,9 +102,14 @@ def downscale(data: bytes, max_edge: int, fmt: str = "WEBP", quality: int = 82) 
     image is upright and carries no location metadata into the cloud.
     """
     Image = _pillow()
-    from PIL import ImageOps
+    from PIL import ImageOps, UnidentifiedImageError
 
-    with Image.open(io.BytesIO(data)) as im:
+    try:
+        opened = Image.open(io.BytesIO(data))
+    except UnidentifiedImageError as e:
+        raise UndecodableMedia(f"{UNDECODABLE_PREFIX}{e}") from e
+
+    with opened as im:
         im = ImageOps.exif_transpose(im)          # bake in rotation, then forget it
         im.thumbnail((max_edge, max_edge), Image.LANCZOS)   # no-ops if already smaller
         if fmt.upper() in {"JPEG", "WEBP"} and im.mode not in {"RGB", "L"}:

@@ -21,6 +21,19 @@ from .store import Catalog
 #: `Connector.list` caps its own output; pass something larger than any real folder.
 _NO_LIMIT = 1_000_000
 
+# OS/filesystem-generated housekeeping files, never actual photo/video content
+# -- Windows' per-folder thumbnail cache, its per-folder view-settings file,
+# macOS's per-folder metadata file, and Synology/QNAP's own "don't index me"
+# marker. Matched by exact name (case-insensitive), not by extension: unlike
+# real media (raw camera formats, obscure video containers), this is a small,
+# stable, well-known set, so a narrow blacklist is safe where an allowlist of
+# "real" extensions would risk excluding some legitimate format nobody's hit
+# yet. These would otherwise get indexed like any other file and then fail
+# every single publish attempt forever (Pillow can't decode them as an image),
+# since nothing marks a permanently-undecodable item done -- see PublishAction's
+# per-item retry-until-success docstring.
+_JUNK_NAMES = {"thumbs.db", "desktop.ini", ".ds_store", ".nomedia"}
+
 
 @dataclass
 class ScanProgress:
@@ -127,7 +140,8 @@ def scan(
                 error_samples.append(f"{directory}: {e}")
             continue
 
-        file_records = [r for r in listing if not r.is_dir]
+        file_records = [r for r in listing
+                        if not r.is_dir and r.name.lower() not in _JUNK_NAMES]
         for record in file_records:
             seen += 1
             if on_file:

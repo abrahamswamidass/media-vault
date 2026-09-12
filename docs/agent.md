@@ -154,6 +154,16 @@ for anything shorter. If `ffmpeg` is ever missing from the image, a video
 fails publish with a clear "ffmpeg is not installed" error rather than
 Pillow's unhelpful "cannot identify image file."
 
+**A file that will never decode as an image is marked done, not retried
+forever.** `index` skips known OS/filesystem housekeeping files by name
+(`Thumbs.db`, `desktop.ini`, `.DS_Store`, `.nomedia`) so they never become
+catalog items in the first place, but anything indexed before that filter
+existed — or any other file Pillow can't identify at all, e.g. a corrupted
+download — used to fail every single `publish` run identically forever
+(only a successful publish marks an item done). It's now marked done with no
+thumbnail/fact, reported separately as "skipped" so it's clear nothing was
+actually published for it, and never seen by `publish` again.
+
 Each item also gets EXIF pulled from a small header read (dimensions, camera
 make/model, real capture date, GPS coordinates, video duration, and shooting
 settings — aperture, shutter speed, ISO, exposure compensation, focal length

@@ -298,6 +298,35 @@ def test_thumbnail_key_is_content_addressed_not_path_addressed(nas, catalog, blo
     assert len(thumbs) == 1
 
 
+def test_undecodable_file_is_marked_done_instead_of_retried_forever(nas, catalog, blobs, facts):
+    """Regression: a file that will never decode as an image (a corrupted
+    download, or a stray OS file like Thumbs.db that got indexed before the
+    scanner started filtering those out -- see scanner.py's _JUNK_NAMES)
+    used to stay unpublished forever, since only a successful publish marks
+    an item done. Every future publish run re-attempted it and re-failed,
+    permanently wasting a slot in every batch. It should instead be marked
+    done (no thumbnail/fact -- there's nothing to publish) so it's counted
+    once, as "skipped", and never seen by publish again."""
+    (nas / "Photos" / "corrupt.jpg").write_bytes(b"not actually a jpeg")
+    conn = _indexed(nas, catalog)
+
+    result = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+
+    assert result.status == STATUS_OK
+    assert result.outputs["published"] == 1        # Photos/real.jpg, unaffected
+    assert result.outputs["skipped"] == 1           # Photos/corrupt.jpg
+    assert result.outputs["failed"] == []
+    assert catalog.published_count("nas") == 2      # marked done either way
+    # Skipped means "no thumbnail was ever derived", not "silently forgotten".
+    thumbs = list((blobs.root / "thumbs").iterdir())
+    assert len(thumbs) == 1
+
+    # A second run must not see it again -- this is the actual bug being
+    # fixed: re-running publish used to re-attempt (and re-fail on) it.
+    result2 = PublishAction("nas", conn, catalog, blobs, facts).run(commit=True)
+    assert result2.status == STATUS_NOOP
+
+
 def test_unindexed_item_without_hash_is_skipped(nas, catalog, blobs, facts):
     """An item with no quick_hash yet (mid-scan) can't be content-addressed."""
     conn = _indexed(nas, catalog)

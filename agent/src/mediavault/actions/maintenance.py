@@ -225,14 +225,26 @@ class PublishAction(Action):
         if not self._pending:
             raise NoOp(f"nothing to publish in {self.source}")
 
-        published, failed = [], []
+        published, failed, skipped = [], [], []
         for row in self._pending:
             item_id = row["item_id"]
             try:
                 thumb_action = ThumbnailAction(item_id, self.connector, self.blobs)
                 thumb = thumb_action.run(commit=True)
                 if thumb.status == "failed":
-                    failed.append({"item_id": item_id, "error": thumb.error})
+                    if thumb.error and thumb.error.startswith(imaging.UNDECODABLE_PREFIX):
+                        # Not a photo/video at all -- e.g. a Thumbs.db that was
+                        # already in the catalog before the scanner started
+                        # filtering that out (see scanner.py's _JUNK_NAMES).
+                        # Retrying changes nothing, so mark it done instead of
+                        # re-failing on it every single publish run forever.
+                        # No thumbnail/fact for it -- there's nothing real to
+                        # publish, just a reason to stop asking.
+                        self.catalog.mark_published(self.source, item_id)
+                        self.catalog.conn.commit()
+                        skipped.append(item_id)
+                    else:
+                        failed.append({"item_id": item_id, "error": thumb.error})
                     continue
                 # A "no-op" thumbnail (already stored) has no outputs — the key is
                 # deterministic from the hash, so recompute it rather than skip.
@@ -397,7 +409,7 @@ class PublishAction(Action):
             except Exception as e:
                 failed.append({"item_id": item_id, "error": str(e)})
 
-        if not published:
+        if not published and not skipped:
             # A NoOp's outputs never reach the caller (Action.run() discards
             # them on this path) — without surfacing at least one real reason
             # here, "every item failed" and "nothing needed doing" print the
@@ -407,4 +419,8 @@ class PublishAction(Action):
                 raise NoOp(f"no items could be published — {len(failed)} failed, "
                           f"e.g. {sample['item_id']}: {sample['error']}")
             raise NoOp("no items could be published")
-        return {"published": len(published), "failed": failed}
+        # Skipped items did mutate the catalog (mark_published, so they stop
+        # being retried) even though nothing was actually published for
+        # them — the `not published and not skipped` check above is what
+        # keeps that real work from being misreported as the no-op case.
+        return {"published": len(published), "failed": failed, "skipped": len(skipped)}
