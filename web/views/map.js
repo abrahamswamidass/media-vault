@@ -12,16 +12,27 @@
 //
 // Leaflet + OpenStreetMap tiles: no API key, no cost, loaded from a CDN only
 // when this view is actually opened (not on every page load).
+//
+// A single capped query (old approach: `limit(2000)`) truncates by whichever
+// order Firestore happens to return docs in -- once the library passed 2000
+// geotagged photos, whole locations could vanish from the map with no way to
+// reach them. Instead we page in the *entire* geotagged set once (cheap: it's
+// just lat/lng-bearing docs, and this is a single-user library) and keep it
+// in memory, then only cluster + render the slice inside the current map
+// viewport, recomputed on every pan/zoom. That's what makes pins "appear" as
+// you zoom into a place and "disappear" as you zoom back out -- the fetch is
+// no longer the bottleneck, the viewport is.
 import {
-  collection, query, where, limit, getDocs,
+  collection, query, where, orderBy, startAfter, limit, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "../firebase.js";
 import { loadHiddenPrefixes, isHidden } from "../hiddenFolders.js";
 import { openPhotoAt } from "../photoModal.js";
 
-// A browser map gets sluggish with tens of thousands of individual markers —
-// this is a preview of where your library has been, not a full data dump.
-const MAX_PINS = 2000;
+const PAGE_SIZE = 500;
+// Not a normal-use ceiling -- a personal library's geotagged set is a few
+// thousand at most. Purely a safety valve against a runaway pagination loop.
+const SAFETY_MAX_ITEMS = 50000;
 
 // Close enough to be "the same spot" (a room, a booth, a grave site) without
 // merging genuinely different nearby locations (the next building over).
@@ -35,6 +46,8 @@ let statusEl = null;
 let mapEl = null;
 let map = null;
 let L = null;
+let markersLayer = null;
+let allItems = [];
 
 async function ensureLeaflet() {
   if (L) return L;
@@ -50,15 +63,24 @@ async function ensureLeaflet() {
 }
 
 async function loadGeotaggedItems() {
-  const [snap, hiddenPrefixes] = await Promise.all([
-    getDocs(query(
-      collection(db, "items"),
+  const hiddenPrefixesPromise = loadHiddenPrefixes();
+  const docs = [];
+  let cursor = null;
+  for (;;) {
+    const constraints = [
       where("latitude", ">=", -90), where("latitude", "<=", 90),
-      limit(MAX_PINS),
-    )),
-    loadHiddenPrefixes(),
-  ]);
-  return snap.docs.map((d) => d.data()).filter((item) => !isHidden(item.item_id, hiddenPrefixes));
+      orderBy("latitude"),
+      limit(PAGE_SIZE),
+    ];
+    if (cursor) constraints.push(startAfter(cursor));
+    // Sequential on purpose -- each page's cursor is the previous page's last doc.
+    const snap = await getDocs(query(collection(db, "items"), ...constraints));
+    docs.push(...snap.docs);
+    if (snap.docs.length < PAGE_SIZE || docs.length >= SAFETY_MAX_ITEMS) break;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+  const hiddenPrefixes = await hiddenPrefixesPromise;
+  return docs.map((d) => d.data()).filter((item) => !isHidden(item.item_id, hiddenPrefixes));
 }
 
 // Haversine distance in meters -- real-world distance, not raw coordinate
@@ -75,8 +97,8 @@ function metersBetween(a, b) {
 }
 
 // Greedy proximity clustering, same shape as duplicates.js's near-dup
-// grouping: not O(n log n)-optimal, but MAX_PINS caps this at a size where
-// the simple O(n^2) scan is cheap enough not to matter.
+// grouping: not O(n log n)-optimal, but this only ever runs over whatever's
+// in the current viewport, which keeps the O(n^2) scan cheap.
 function clusterByLocation(items) {
   const used = new Set();
   const clusters = [];
@@ -112,7 +134,7 @@ function clusterIcon(Lmod, count) {
   });
 }
 
-function addMarkers(Lmod, clusters) {
+function addMarkers(Lmod, clusters, layer) {
   for (const group of clusters) {
     // Leaflet's own default pin only applies when the `icon` option key is
     // absent entirely -- passing `icon: undefined` explicitly (even though
@@ -120,12 +142,26 @@ function addMarkers(Lmod, clusters) {
     // Leaflet then tries to call .createIcon() on undefined. So the key is
     // only ever added for an actual cluster, never included-but-empty.
     const options = group.length > 1 ? { icon: clusterIcon(Lmod, group.length) } : {};
-    const marker = Lmod.marker(centroid(group), options).addTo(map);
+    const marker = Lmod.marker(centroid(group), options).addTo(layer);
     // Straight to the shared modal, same click-to-open behavior Browse
     // already has, rather than a one-photo popup -- openPhotoAt gives the
     // whole cluster prev/next navigation (and swipe, on a phone) for free.
     marker.on("click", () => openPhotoAt(group, 0));
   }
+}
+
+// Re-clusters and redraws markers for whatever's currently inside the map's
+// viewport. Cheap to call on every moveend -- allItems tops out in the low
+// thousands for a personal library, and this replaces markers rather than
+// the whole map, so there's no flicker.
+function renderVisible(Lmod) {
+  const bounds = map.getBounds();
+  const visible = allItems.filter((item) => bounds.contains([item.latitude, item.longitude]));
+  markersLayer.clearLayers();
+  const clusters = clusterByLocation(visible);
+  addMarkers(Lmod, clusters, markersLayer);
+  const grouped = clusters.length < visible.length ? `, ${clusters.length} location(s)` : "";
+  statusEl.textContent = `${visible.length} of ${allItems.length} geotagged photo${allItems.length === 1 ? "" : "s"} in view${grouped}. Pan or zoom to see more.`;
 }
 
 export async function mount(container) {
@@ -145,19 +181,20 @@ export async function mount(container) {
       maxZoom: 19,
     }).addTo(map);
 
-    const items = await loadGeotaggedItems();
-    if (!items.length) {
+    allItems = await loadGeotaggedItems();
+    if (!allItems.length) {
       statusEl.textContent = "No geotagged photos yet — most photos have no "
         + "GPS data, or publish hasn't run with location extraction yet.";
       return;
     }
 
-    const clusters = clusterByLocation(items);
-    addMarkers(Lmod, clusters);
-    map.fitBounds(Lmod.latLngBounds(items.map((i) => [i.latitude, i.longitude])).pad(0.1));
-    const capped = items.length === MAX_PINS ? ` (showing the first ${MAX_PINS})` : "";
-    const grouped = clusters.length < items.length ? `, ${clusters.length} location(s)` : "";
-    statusEl.textContent = `${items.length} geotagged photo${items.length === 1 ? "" : "s"}${grouped}${capped}.`;
+    markersLayer = Lmod.layerGroup().addTo(map);
+    map.on("moveend", () => renderVisible(Lmod));
+    map.fitBounds(Lmod.latLngBounds(allItems.map((i) => [i.latitude, i.longitude])).pad(0.1));
+    // fitBounds fires moveend itself once the view actually changes, but if
+    // the view was already at that extent (e.g. a single point) it won't --
+    // so render explicitly once too, rather than depending on that event.
+    renderVisible(Lmod);
   } catch (err) {
     statusEl.textContent = `Failed to load map: ${err.message}`;
     console.error(err);
@@ -169,5 +206,7 @@ export function unmount() {
     map.remove();
     map = null;
   }
+  markersLayer = null;
+  allItems = [];
   root.innerHTML = "";
 }
