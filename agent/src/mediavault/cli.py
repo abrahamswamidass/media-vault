@@ -10,6 +10,7 @@ Media Vault agent CLI.
     mediavault cold-archive nas                preview what's not yet in cold storage
     mediavault cold-archive nas --commit --max-items 20   push a small batch first
     mediavault stats                           what the catalog knows
+    mediavault match-report --a nas --b drive  folder tree of nas files drive also has (read-only)
     mediavault reset nas --commit              wipe local catalog data for a source (testing)
     mediavault unpublish nas --commit          clear published_at only, force a full republish
 
@@ -35,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Optional
 
-from .catalog import Catalog, dedup as dedup_mod, scanner
+from .catalog import Catalog, dedup as dedup_mod, scanner, match_report
 from .catalog.people import MATCH_THRESHOLD, recluster
 from .actions.amazon import StageForAmazonAction
 from .actions.coldstorage import ColdArchiveAction
@@ -509,6 +510,23 @@ def cmd_stats(args) -> int:
             print(f"{r['source']:10} {r['indexed']:>10,} {r['archived']:>10,} "
                   f"{r['published']:>10,} {r['skipped']:>10,} {r['cold_archived']:>10,} "
                   f"{r['duplicate_groups']:>12,} {_human(r['reclaimable_bytes']):>13}")
+        return 0
+
+
+# --------------------------------------------------------------------------- #
+# match-report
+# --------------------------------------------------------------------------- #
+def cmd_match_report(args) -> int:
+    with _catalog(args) as catalog:
+        matches = match_report.find_matches(catalog, args.a, args.b, min_size=args.min_size)
+        if args.json:
+            _emit(matches, True)
+            return 0
+        if not matches:
+            print(f"No matches between '{args.a}' and '{args.b}' (indexed both yet?).")
+            return 0
+        tree = match_report.build_tree(matches)
+        print(match_report.render_tree(tree, args.a, args.b))
         return 0
 
 
@@ -1292,6 +1310,24 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("stats", help="what the catalog currently knows")
     s.add_argument("--db", help="catalog database path")
     s.set_defaults(_fn=cmd_stats)
+
+    mr = sub.add_parser(
+        "match-report",
+        help="folder tree of files on one source that also exist on another "
+             "(matched by quick_hash) — read-only, not a dedup action",
+        description="Every active file on --a whose quick_hash also appears, "
+                    "active, on --b, as a folder tree built from --a's paths "
+                    "(only --a has real paths in the catalog; the --b side "
+                    "shows just the matched name+size). Purely informational: "
+                    "unlike `dedup`, this compares across sources on purpose, "
+                    "and nothing it prints can be fed back in to delete or "
+                    "archive anything.")
+    mr.add_argument("--a", default="nas", help="source to build the tree from (default: nas)")
+    mr.add_argument("--b", default="drive", help="source to match against (default: drive)")
+    mr.add_argument("--min-size", type=int, default=1, dest="min_size",
+                    help="skip files smaller than this many bytes (default: 1)")
+    mr.add_argument("--db", help="catalog database path")
+    mr.set_defaults(_fn=cmd_match_report)
 
     # -- people --
     pe = sub.add_parser(
