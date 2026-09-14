@@ -69,6 +69,22 @@ see a crash instead of a brief pause, it's a persistent connectivity problem
 worth investigating on the NAS/network side, not something a re-run alone
 will fix.
 
+**A single bad file no longer crashes the whole scan either** — a
+connector-specific error stating/listing one file (a native Google Doc with
+no binary content on Drive, say — `HttpError: Only files with binary content
+can be downloaded`) is now logged as that one file's error and skipped, the
+same way a filesystem permission error already was. Check the error samples
+in the final report (or `--debug`'s live output) for what actually failed.
+
+**`index drive` running at the same time as `publish` is supported** — the
+catalog is one SQLite file, and both are legitimate concurrent writers. Two
+things make that actually hold up in practice: `index` now commits every 200
+files instead of only at the end of each directory (a single Drive folder
+can run past 1000 files, which used to hold the write lock open for as long
+as that whole folder took), and a "database is locked" that still happens
+despite that gets retried automatically (a few attempts, a few seconds
+apart) instead of crashing the run outright.
+
 **`dedup`'s confirmation pass is hardened the same way.** Every duplicate
 candidate over 128 KB gets a full-content read to confirm it (see
 "Deduplication" below) — on a large library that's thousands of reads over

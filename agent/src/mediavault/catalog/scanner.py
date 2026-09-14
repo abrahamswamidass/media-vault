@@ -12,6 +12,8 @@ real cost of indexing — unavoidable, since dedup needs a fingerprint.
 """
 from __future__ import annotations
 
+import sqlite3
+import time
 from dataclasses import dataclass
 from typing import Callable, Iterator, Optional
 
@@ -20,6 +22,27 @@ from .store import Catalog
 
 #: `Connector.list` caps its own output; pass something larger than any real folder.
 _NO_LIMIT = 1_000_000
+
+#: A directory can hold thousands of files (a Google Drive folder in
+#: particular -- seen over 1000 in one folder in practice), and every
+#: upsert() in it shares one open write transaction until the directory
+#: finishes (see checkpoint()'s docstring). That held the write lock open
+#: for however long the *whole* directory took, which was long enough for
+#: a concurrent writer (e.g. `publish` running at the same time -- WAL
+#: mode + busy_timeout is meant to let that work, see Catalog.__init__)
+#: to exceed its own wait and crash with "database is locked" instead of
+#: just waiting its turn. Committing periodically instead of only at each
+#: directory's end bounds how long any single held transaction can run.
+_COMMIT_EVERY_N_FILES = 200
+
+#: SQLite's own busy_timeout (30s, see Catalog.__init__) already waits out
+#: most lock contention -- this is a second, coarser layer on top for the
+#: rare case a wait still isn't enough (e.g. `index` and `publish` both
+#: legitimately busy at once for longer than that). Retried a bounded
+#: number of times with a real pause in between, same shape as the SMB
+#: connector's own _retry() for a dropped session.
+_LOCK_RETRY_ATTEMPTS = 3
+_LOCK_RETRY_DELAY_SECONDS = 5
 
 # OS/filesystem-generated housekeeping files, never actual photo/video content
 # -- Windows' per-folder thumbnail cache, its per-folder view-settings file,
@@ -57,6 +80,24 @@ class ScanReport:
         return self.errors == 0
 
 
+def _is_locked_error(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
+
+
+def _upsert_with_retry(catalog: Catalog, source: str, record: FileRecord) -> None:
+    """catalog.upsert(), retrying a bounded number of times if another
+    writer (e.g. a concurrent `publish`) is holding the lock past
+    busy_timeout -- see _LOCK_RETRY_ATTEMPTS' docstring above."""
+    for attempt in range(_LOCK_RETRY_ATTEMPTS):
+        try:
+            catalog.upsert(source, record)
+            return
+        except sqlite3.OperationalError as e:
+            if not _is_locked_error(e) or attempt == _LOCK_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(_LOCK_RETRY_DELAY_SECONDS)
+
+
 def walk_directories(connector: Connector, start: str = "",
                      on_list: Optional[Callable[[str], None]] = None) -> Iterator[str]:
     """Yield every directory under `start`, parents before children, sorted.
@@ -82,7 +123,11 @@ def walk_directories(connector: Connector, start: str = "",
             for record in connector.list(current, limit=_NO_LIMIT):
                 if record.is_dir:
                     children.append(record.id)
-        except (FileNotFoundError, ValueError, PermissionError):
+        except Exception:
+            # Broad for the same reason scan()'s own listing catch is --
+            # a connector-specific error (e.g. Drive's HttpError) finding
+            # this directory's subfolders must cost that one directory's
+            # children, not the whole walk.
             continue
         stack = sorted(children) + stack
 
@@ -134,7 +179,11 @@ def scan(
 
         try:
             listing = list(connector.list(directory, limit=_NO_LIMIT))
-        except (FileNotFoundError, ValueError, PermissionError) as e:
+        except Exception as e:
+            # Broad for the same reason the per-file catch below is -- a
+            # transient/connector-specific error (e.g. a Drive API hiccup)
+            # listing one directory must cost that directory, not the
+            # whole scan.
             errors += 1
             if len(error_samples) < 10:
                 error_samples.append(f"{directory}: {e}")
@@ -149,9 +198,25 @@ def scan(
             try:
                 # list() carries no hash; stat() does the head/tail read.
                 full = connector.stat(record.id)
-                catalog.upsert(source, full)
+                # Broad on purpose -- one file's failure must never crash a
+                # multi-hour scan, and what it can raise varies by
+                # connector: FileNotFoundError/PermissionError/OSError for
+                # a filesystem, but Drive's own googleapiclient.errors.
+                # HttpError for e.g. a native Google Doc with no binary
+                # content to hash (real incident: this crashed an
+                # overnight `index drive` run outright instead of being
+                # logged and skipped like every other per-file problem).
+                _upsert_with_retry(catalog, source, full)
                 indexed += 1
-            except (FileNotFoundError, ValueError, PermissionError, OSError) as e:
+                # Not just per-directory (see _COMMIT_EVERY_N_FILES) -- a
+                # single Drive folder has run past 1000 files in practice,
+                # which held one uncommitted transaction (and the write
+                # lock with it) open for as long as that whole folder
+                # took, long enough to collide with a concurrent `publish`
+                # past its own busy_timeout wait.
+                if indexed % _COMMIT_EVERY_N_FILES == 0:
+                    catalog.conn.commit()
+            except Exception as e:
                 errors += 1
                 if len(error_samples) < 10:
                     error_samples.append(f"{record.id}: {e}")
