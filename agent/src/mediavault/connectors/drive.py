@@ -32,6 +32,22 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 _FIELDS = "id,name,size,mimeType,modifiedTime"
 
+# A native Google Doc/Sheet/Slide/Form/Drawing/... (every Drive-native
+# format shares this prefix, e.g. application/vnd.google-apps.document) has
+# no binary content at all -- Drive can only "Export" it as e.g. PDF, never
+# download it via the plain alt=media this connector's read() uses. Real
+# incident: this crashed an overnight `index drive` run outright with a 403
+# ("Only files with binary content can be downloaded") before scanner.py's
+# per-file error handling was hardened to survive a connector-specific
+# error -- and even hardened, it would have retried and re-failed on the
+# same file every single future re-index forever, since there was nothing
+# to remember "this one will never work." Filtering it out right here,
+# before it's ever yielded, means the scanner never sees it at all -- the
+# same principle as scanner.py's own _JUNK_NAMES filter, just decided with
+# information only this connector has (the listing's own mimeType, no
+# extra API call needed).
+_NATIVE_GOOGLE_MIME_PREFIX = "application/vnd.google-apps."
+
 
 def _parse_rfc3339(value: str) -> float:
     """Drive's modifiedTime, e.g. "2024-05-01T12:34:56.789Z" -> epoch seconds."""
@@ -126,6 +142,8 @@ class DriveConnector(Connector):
             ).execute()
             for f in resp.get("files", []):
                 is_dir = f["mimeType"] == _FOLDER_MIME
+                if not is_dir and f["mimeType"].startswith(_NATIVE_GOOGLE_MIME_PREFIX):
+                    continue
                 yield FileRecord(
                     id=f["id"], name=f["name"], source=self.name,
                     size=None if is_dir else int(f.get("size", 0)),

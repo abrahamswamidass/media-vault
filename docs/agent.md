@@ -543,6 +543,13 @@ ID**, not a path — Drive has no path concept, files are related to folders by
 ID. Omit it to scan from "My Drive" itself (the default, via Drive's own
 `root` alias).
 
+**Native Google Docs/Sheets/Slides/Forms/Drawings are never indexed** — they
+have no binary content at all (Drive can only "Export" one, e.g. as PDF,
+never download it the way this project reads a real file), so `index drive`
+filters them out by their `mimeType` at listing time, the same way
+`_JUNK_NAMES` keeps `Thumbs.db` out on the NAS side. They're not media
+anyway; nothing is lost by skipping them.
+
 A synced Drive folder mounted as a local path (e.g. `G:\`) is a different,
 simpler option if you'd rather point the *mount-based* connector at it
 instead of using the API — but it only sees whatever your Drive desktop app

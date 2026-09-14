@@ -104,6 +104,35 @@ def test_list_returns_files_and_folders_under_a_folder_id(monkeypatch):
     assert folder.is_dir and folder.size is None
 
 
+def test_list_excludes_native_google_docs_sheets_and_slides(monkeypatch):
+    """Regression: a native Google Doc has no binary content at all -- Drive
+    can only "Export" it (e.g. as PDF), never download it via the plain
+    alt=media read()/stat() use. This crashed an overnight `index drive`
+    run outright (403 "Only files with binary content can be downloaded"),
+    and even once that stopped crashing the whole scan, the file would
+    have been retried and re-failed on every future re-index forever --
+    nothing else ever marks a file "will never work". Filtering it out
+    right here, before it's ever yielded, means the scanner never sees it
+    at all, and never will."""
+    entries = {
+        "f1": {"id": "f1", "name": "a.jpg", "mimeType": "image/jpeg",
+               "size": "100", "modifiedTime": "2024-01-01T00:00:00Z", "parents": ["root"]},
+        "doc1": {"id": "doc1", "name": "Some Doc", "mimeType": "application/vnd.google-apps.document",
+                 "modifiedTime": "2024-01-01T00:00:00Z", "parents": ["root"]},
+        "sheet1": {"id": "sheet1", "name": "Some Sheet",
+                   "mimeType": "application/vnd.google-apps.spreadsheet",
+                   "modifiedTime": "2024-01-01T00:00:00Z", "parents": ["root"]},
+        "d1": {"id": "d1", "name": "sub", "mimeType": drive_mod._FOLDER_MIME,
+               "modifiedTime": "2024-01-01T00:00:00Z", "parents": ["root"]},
+    }
+    conn, _ = _connector(monkeypatch, entries, {})
+
+    records = list(conn.list())
+
+    ids = {r.id for r in records}
+    assert ids == {"f1", "d1"}  # doc1/sheet1 never yielded; the real folder still is
+
+
 def test_list_with_no_limit_still_terminates_and_returns_everything(monkeypatch):
     entries = {
         f"f{i}": {"id": f"f{i}", "name": f"{i}.jpg", "mimeType": "image/jpeg",
