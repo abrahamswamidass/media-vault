@@ -33,7 +33,16 @@ _NO_LIMIT = 1_000_000
 #: to exceed its own wait and crash with "database is locked" instead of
 #: just waiting its turn. Committing periodically instead of only at each
 #: directory's end bounds how long any single held transaction can run.
-_COMMIT_EVERY_N_FILES = 200
+#:
+#: Time-based, not a file count: a fixed count only helps directories bigger
+#: than it (an earlier version used 200, which did nothing for the common
+#: case of Drive folders well under that -- most of a real library's
+#: folders, each of which can still take a real while given how much
+#: slower a Drive API round trip per file is than a local NAS read). A
+#: time interval bounds the lock-hold duration directly, regardless of how
+#: many or few files it takes to get there, and carries over between
+#: directories too, not just within one large one.
+_COMMIT_INTERVAL_SECONDS = 5.0
 
 #: SQLite's own busy_timeout (30s, see Catalog.__init__) already waits out
 #: most lock contention -- this is a second, coarser layer on top for the
@@ -98,38 +107,45 @@ def _upsert_with_retry(catalog: Catalog, source: str, record: FileRecord) -> Non
             time.sleep(_LOCK_RETRY_DELAY_SECONDS)
 
 
-def walk_directories(connector: Connector, start: str = "",
-                     on_list: Optional[Callable[[str], None]] = None) -> Iterator[str]:
-    """Yield every directory under `start`, parents before children, sorted.
+def walk_directories(
+    connector: Connector, start: str = "",
+    on_list: Optional[Callable[[str], None]] = None,
+) -> Iterator[tuple[str, Optional[list[FileRecord]], Optional[Exception]]]:
+    """Yield (directory, listing, error) for every directory under `start`,
+    parents before children, sorted -- exactly one of `listing`/`error` is
+    set. `listing` is every entry `connector.list()` returned (files and
+    subfolders both); `scan()` reuses it directly for file processing
+    instead of listing the same directory a second time itself, which is
+    what this function originally only used to find subfolder children --
+    a full extra API round trip per directory for nothing, doubling a real
+    cost on a connector where listing isn't free (Drive).
 
     Deterministic ordering is what makes the resume cursor meaningful: the same
     tree always produces the same sequence, so "resume after X" is well defined.
 
-    on_list(directory), if given, fires right before each directory's
-    children are listed — including directories `scan()` is *skipping* while
-    fast-forwarding to a resume cursor. That skip phase re-walks (and
-    re-lists) every directory before the cursor with otherwise zero progress
-    output, so a hang during it looks identical to "resuming and nothing has
-    happened yet" — this is what tells them apart (see GitHub #11).
+    on_list(directory), if given, fires right before each directory is
+    listed — including directories `scan()` is *skipping* while fast-forwarding
+    to a resume cursor. That skip phase re-walks (and re-lists) every directory
+    before the cursor with otherwise zero progress output, so a hang during it
+    looks identical to "resuming and nothing has happened yet" — this is what
+    tells them apart (see GitHub #11).
     """
     stack = [start]
     while stack:
         current = stack.pop(0)
-        yield current
         if on_list:
             on_list(current)
-        children = []
         try:
-            for record in connector.list(current, limit=_NO_LIMIT):
-                if record.is_dir:
-                    children.append(record.id)
-        except Exception:
-            # Broad for the same reason scan()'s own listing catch is --
-            # a connector-specific error (e.g. Drive's HttpError) finding
-            # this directory's subfolders must cost that one directory's
-            # children, not the whole walk.
+            listing = list(connector.list(current, limit=_NO_LIMIT))
+        except Exception as e:
+            # Broad for the same reason scan()'s own per-file catch is --
+            # a connector-specific error (e.g. Drive's HttpError) listing
+            # this directory must cost that one directory, not the whole walk.
+            yield current, None, e
             continue
+        children = [r.id for r in listing if r.is_dir]
         stack = sorted(children) + stack
+        yield current, listing, None
 
 
 def scan(
@@ -164,8 +180,9 @@ def scan(
     errors = 0
     error_samples: list[str] = []
     skipping = bool(cursor)
+    last_commit = time.monotonic()
 
-    for directory in walk_directories(connector, on_list=on_list):
+    for directory, listing, list_error in walk_directories(connector, on_list=on_list):
         # Resume: fast-forward past everything already committed. The cursor holds
         # the last *finished* directory, so skipping stops once we pass it.
         if skipping:
@@ -177,16 +194,14 @@ def scan(
         seen = 0
         indexed = 0
 
-        try:
-            listing = list(connector.list(directory, limit=_NO_LIMIT))
-        except Exception as e:
+        if list_error is not None:
             # Broad for the same reason the per-file catch below is -- a
             # transient/connector-specific error (e.g. a Drive API hiccup)
             # listing one directory must cost that directory, not the
             # whole scan.
             errors += 1
             if len(error_samples) < 10:
-                error_samples.append(f"{directory}: {e}")
+                error_samples.append(f"{directory}: {list_error}")
             continue
 
         file_records = [r for r in listing
@@ -208,14 +223,15 @@ def scan(
                 # logged and skipped like every other per-file problem).
                 _upsert_with_retry(catalog, source, full)
                 indexed += 1
-                # Not just per-directory (see _COMMIT_EVERY_N_FILES) -- a
-                # single Drive folder has run past 1000 files in practice,
-                # which held one uncommitted transaction (and the write
-                # lock with it) open for as long as that whole folder
-                # took, long enough to collide with a concurrent `publish`
-                # past its own busy_timeout wait.
-                if indexed % _COMMIT_EVERY_N_FILES == 0:
+                # Not just per-directory (see _COMMIT_INTERVAL_SECONDS) --
+                # a single Drive folder has run past 1000 files in
+                # practice, which held one uncommitted transaction (and
+                # the write lock with it) open for as long as that whole
+                # folder took, long enough to collide with a concurrent
+                # `publish` past its own busy_timeout wait.
+                if time.monotonic() - last_commit >= _COMMIT_INTERVAL_SECONDS:
                     catalog.conn.commit()
+                    last_commit = time.monotonic()
             except Exception as e:
                 errors += 1
                 if len(error_samples) < 10:
@@ -224,6 +240,7 @@ def scan(
         files_indexed += indexed
         # Commit the directory and its cursor together — a crash costs one directory.
         catalog.checkpoint(source, directory, files_indexed)
+        last_commit = time.monotonic()
 
         if on_progress:
             on_progress(ScanProgress(directory, seen, indexed, errors))

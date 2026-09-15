@@ -178,7 +178,7 @@ def test_a_large_directory_commits_periodically_not_just_at_the_end(tmp_path, mo
     a second, independent connection to the same file can already see the
     first batch's rows mid-directory, not just after the whole 25-file
     directory (and its own end-of-directory checkpoint) finishes."""
-    monkeypatch.setattr(scanner, "_COMMIT_EVERY_N_FILES", 10)
+    monkeypatch.setattr(scanner, "_COMMIT_INTERVAL_SECONDS", 0)
     records = [
         FileRecord(id=f"{i}.jpg", name=f"{i}.jpg", source="fake", size=10, mtime=0)
         for i in range(25)

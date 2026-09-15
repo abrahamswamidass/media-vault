@@ -77,13 +77,19 @@ same way a filesystem permission error already was. Check the error samples
 in the final report (or `--debug`'s live output) for what actually failed.
 
 **`index drive` running at the same time as `publish` is supported** — the
-catalog is one SQLite file, and both are legitimate concurrent writers. Two
-things make that actually hold up in practice: `index` now commits every 200
-files instead of only at the end of each directory (a single Drive folder
-can run past 1000 files, which used to hold the write lock open for as long
-as that whole folder took), and a "database is locked" that still happens
-despite that gets retried automatically (a few attempts, a few seconds
-apart) instead of crashing the run outright.
+catalog is one SQLite file, and both are legitimate concurrent writers. A few
+things make that actually hold up in practice: `index` now commits every 5
+seconds instead of only at the end of each directory (a single Drive folder
+can run past 1000 files, which used to hold the write lock — and progress
+visible to `stats` in another terminal — for as long as that whole folder
+took; a time interval, not a file count, keeps that bounded regardless of
+directory size, and carries over between small directories too, not just
+within one large one). A "database is locked" that still happens despite
+that gets retried automatically (a few attempts, a few seconds apart)
+instead of crashing the run outright. Each directory is also only listed
+once now (previously twice — once to find its subfolders, again for its
+files), a real, avoidable API round trip on a connector where listing isn't
+free (Drive).
 
 **`dedup`'s confirmation pass is hardened the same way.** Every duplicate
 candidate over 128 KB gets a full-content read to confirm it (see
