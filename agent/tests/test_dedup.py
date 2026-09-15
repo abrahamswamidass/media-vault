@@ -14,7 +14,9 @@ import pytest
 from mediavault.actions import STATUS_FAILED, STATUS_NOOP, STATUS_OK
 from mediavault.actions.dedup import ArchiveDuplicatesAction
 from mediavault.actions.maintenance import DedupSourceAction, IndexAction
-from mediavault.catalog import Catalog, find_duplicates, folder_breakdown, scan, summarize
+from mediavault.catalog import (
+    Catalog, find_duplicates, folder_breakdown, iter_duplicates, scan, summarize,
+)
 from mediavault.connectors.nas import NASConnector
 
 #: Bigger than the 128 KB the quick hash actually covers, so these files reach the
@@ -480,6 +482,56 @@ def test_on_confirm_reports_an_accurate_total_upfront(nas, catalog):
 
     assert [t for _d, t in calls] == [3, 3, 3]
     assert [d for d, _t in calls] == [1, 2, 3]
+
+
+# --------------------------------------------------------------------------- #
+# iter_duplicates() -- the streaming form `dedup --commit` uses so it can
+# archive a group right after confirming it, instead of confirming the
+# whole source before the first byte of trash moves (see its own
+# docstring). The property that actually matters: confirming group N+1 is
+# deferred until it's asked for, not done eagerly alongside group N.
+# --------------------------------------------------------------------------- #
+def test_iter_duplicates_confirms_lazily_one_group_at_a_time(nas, catalog):
+    for i in range(3):
+        content = bytes([i]) + BIG
+        _write(nas, f"g{i}_a.jpg", content, mtime=1_000_000)
+        _write(nas, f"g{i}_b.jpg", content, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    calls = []
+    gen = iter_duplicates(catalog, "nas", conn,
+                          on_confirm=lambda done, total, item_id: calls.append(item_id))
+
+    first = next(gen)
+    assert first.confirmed
+    assert len(calls) == 1  # only the first group's confirmation ran so far
+
+    second = next(gen)
+    assert second.confirmed
+    assert len(calls) == 2  # confirming the second only happened once it was asked for
+
+    third = next(gen)
+    assert third.confirmed
+    assert len(calls) == 3
+
+    with pytest.raises(StopIteration):
+        next(gen)
+
+
+def test_iter_duplicates_and_find_duplicates_agree_on_content(nas, catalog):
+    """find_duplicates() is just iter_duplicates() materialized and sorted
+    -- same groups either way, just a different order and moment of cost."""
+    for i in range(3):
+        content = bytes([i]) + BIG
+        _write(nas, f"g{i}_a.jpg", content, mtime=1_000_000)
+        _write(nas, f"g{i}_b.jpg", content, mtime=2_000_000)
+    conn = _indexed(nas, catalog)
+
+    streamed = {g.keeper["item_id"] for g in iter_duplicates(catalog, "nas", conn)}
+    materialized = {g.keeper["item_id"] for g in find_duplicates(catalog, "nas", conn)}
+
+    assert streamed == materialized
+    assert len(streamed) == 3
 
 
 # --------------------------------------------------------------------------- #

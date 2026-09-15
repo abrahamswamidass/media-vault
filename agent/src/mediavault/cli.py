@@ -257,6 +257,68 @@ def cmd_dedup(args) -> int:
             count = f"{done}/{total}" if total else str(done)
             print(f"  confirming {count}: {item_id}", flush=True)
 
+        # --commit archives each group as soon as it's confirmed instead of
+        # confirming the whole source first (see iter_duplicates()'s
+        # docstring) -- real progress on a large backlog instead of a long
+        # silent confirmation pass with nothing archived yet, and an
+        # interrupted run is actually resumable: already-archived groups
+        # drop out of state='active' and won't be re-confirmed next time,
+        # unlike the old confirm-everything-then-archive-everything shape,
+        # which lost all confirmation work on a crash no matter how close
+        # to done it was. Trade-off: archiving order is whatever
+        # duplicate_groups() returns, not size-prioritized like the preview
+        # below -- --commit is already a deliberate "just do it", not a
+        # "decide what to do first" step, so that's worth not paying for
+        # the same expensive full-content reads twice.
+        if args.commit and not args.json and not args.by_folder:
+            log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
+            archived = failed = attempted = 0
+            reclaimed = 0
+            groups_seen = unconfirmed = split = 0
+            print(f"Archiving duplicates within '{args.source}' as each is "
+                  f"confirmed (never compared against other sources):\n")
+            for group in dedup_mod.iter_duplicates(
+                    catalog, args.source, connector, confirm=not args.no_confirm,
+                    min_size=args.min_size,
+                    on_confirm=confirm_progress if args.debug else None):
+                if args.max_groups is not None and attempted >= args.max_groups:
+                    break
+                groups_seen += 1
+                if not group.confirmed:
+                    unconfirmed += 1
+                split += len(group._split)
+                if not group.safe_to_archive:
+                    continue
+                attempted += 1
+                result = log.record(
+                    ArchiveDuplicatesAction(group, connector, catalog).run(commit=True))
+                if result.status == "failed":
+                    failed += 1
+                    print(f"  ✗ {result.detail}")
+                else:
+                    archived += 1
+                    gained = result.outputs.get("bytes_reclaimed", 0)
+                    reclaimed += gained
+                    copies = len(group.losers)
+                    print(f"  ✓ {group.keeper['item_id']}: archived {copies} "
+                          f"cop{'y' if copies == 1 else 'ies'} ({_human(gained)})")
+
+            _banner(True)
+            print(f"\nArchived {archived} group(s), reclaimed {_human(reclaimed)}. "
+                  f"Copies moved to trash and are recoverable.")
+            if failed:
+                print(f"{failed} group(s) failed — see the journal.")
+            if unconfirmed:
+                print(f"{unconfirmed} group(s) unconfirmed and skipped.")
+            if split:
+                print(f"{split} file(s) shared a fingerprint but differed in "
+                      f"content — left alone.")
+            return 0
+
+        # --- preview (no --commit), or --json/--by-folder: sees the whole
+        # source sorted biggest-reclaimable-first before anything is acted
+        # on -- unchanged from before, since none of this path archives
+        # anything, so there's nothing to lose to a crash here. ----------- #
         groups = dedup_mod.find_duplicates(
             catalog, args.source, connector,
             confirm=not args.no_confirm, min_size=args.min_size,
@@ -324,7 +386,10 @@ def cmd_dedup(args) -> int:
             print(f"{summary['split_by_verification']} file(s) shared a fingerprint but "
                   f"differed in content — left alone.")
 
-        # --- act ---------------------------------------------------------- #
+        # --- dry-run validation only: args.commit is always False here,
+        # the --commit path above already returned. Runs each candidate's
+        # own validate() (existence checks, etc.) so a preview surfaces a
+        # problem before you ever run --commit for real. ------------------ #
         actionable = [g for g in groups if g.safe_to_archive]
         if not actionable:
             return 0
@@ -332,26 +397,14 @@ def cmd_dedup(args) -> int:
             actionable = actionable[:args.max_groups]
 
         log = ActionLog(args.log_dir or os.getenv("ACTION_LOG", "/data/catalog/actions"))
-        archived = failed = 0
-        reclaimed = 0
-
         print()
         for g in actionable:
             result = log.record(
-                ArchiveDuplicatesAction(g, connector, catalog).run(commit=args.commit))
+                ArchiveDuplicatesAction(g, connector, catalog).run(commit=False))
             if result.status == "failed":
-                failed += 1
                 print(f"  ✗ {result.detail}")
-            elif args.commit:
-                archived += 1
-                reclaimed += result.outputs.get("bytes_reclaimed", 0)
 
-        _banner(args.commit)
-        if args.commit:
-            print(f"Archived {archived} group(s), reclaimed {_human(reclaimed)}. "
-                  f"Copies moved to trash and are recoverable.")
-            if failed:
-                print(f"{failed} group(s) failed — see the journal.")
+        _banner(False)
         return 0
 
 

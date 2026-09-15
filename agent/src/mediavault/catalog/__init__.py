@@ -1,14 +1,14 @@
 """The local catalog — a SQLite index that makes the agent answerable offline."""
 from .store import Catalog
 from .scanner import ScanReport, scan, walk_directories
-from .dedup import DuplicateGroup, find_duplicates, folder_breakdown, summarize
+from .dedup import DuplicateGroup, find_duplicates, folder_breakdown, iter_duplicates, summarize
 from .people import assign_person, recluster, MATCH_THRESHOLD
 from .match_report import find_matches, build_tree, render_tree, TreeNode
 
 __all__ = [
     "Catalog",
     "scan", "walk_directories", "ScanReport",
-    "find_duplicates", "summarize", "folder_breakdown", "DuplicateGroup",
+    "find_duplicates", "iter_duplicates", "summarize", "folder_breakdown", "DuplicateGroup",
     "assign_person", "recluster", "MATCH_THRESHOLD",
     "find_matches", "build_tree", "render_tree", "TreeNode",
 ]

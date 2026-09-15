@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 from ..ports import Connector
 from .store import Catalog
@@ -127,7 +127,7 @@ def _full_hash_cached(catalog: Optional[Catalog], connector: Connector,
     return computed
 
 
-def find_duplicates(
+def iter_duplicates(
     catalog: Catalog,
     source: str,
     connector: Optional[Connector] = None,
@@ -135,23 +135,31 @@ def find_duplicates(
     confirm: bool = True,
     min_size: int = 1,
     on_confirm: Optional[Callable[[int, int, str], None]] = None,
-) -> list[DuplicateGroup]:
-    """Find exact-duplicate groups within one source and choose each survivor.
+) -> Iterator[DuplicateGroup]:
+    """Same confirmation logic as find_duplicates(), but yields each group
+    the moment it's confirmed instead of collecting the whole source into
+    one list first. This is what makes `dedup --commit` able to archive a
+    group right after confirming it, rather than confirming every
+    candidate in the whole source before the first byte of trash moves --
+    on a library with thousands of candidates, confirmation alone (a real
+    full-content NAS read per group) can take a very long time with
+    nothing archived and no visible sign anything is happening.
 
-    With `confirm=True` (the default) every group larger than the quick-hash
-    coverage window is verified by fully hashing its members, and any member whose
-    content actually differs is dropped from the group rather than archived. That
-    verification needs a live `connector`; without one, groups come back
-    unconfirmed and no action will archive them.
+    It also makes an interrupted `--commit` run genuinely resumable in a
+    way find_duplicates() never was: whatever already got archived before
+    a crash drops out of state='active' and won't be re-confirmed on the
+    next run. Collecting everything into one list first meant a crash
+    partway through the confirmation pass threw away *all* of it, no
+    matter how close to done it was -- nothing about confirmation is
+    persisted anywhere.
 
-    on_confirm(done, total, keeper_item_id), if given, fires right before each
-    group that actually needs a full-content read — not every group, since
-    anything at or under the quick-hash coverage window is confirmed for
-    free. On a library where most files exceed that window, confirmation can
-    mean thousands of full-file reads with otherwise zero progress output —
-    the same silent-but-working problem `index --debug` solved for scanning.
+    Not sorted by reclaimable_bytes the way find_duplicates() is -- that
+    requires knowing every group's size before archiving the first one,
+    exactly the "wait for everything" cost this exists to avoid. Groups
+    come out in whatever order duplicate_groups() itself returns them.
+
+    See find_duplicates() for what `on_confirm` receives.
     """
-    groups: list[DuplicateGroup] = []
     raw_groups = catalog.duplicate_groups(source, min_size=min_size)
 
     # All members of a group share one size (it's embedded in quick_hash
@@ -194,9 +202,43 @@ def find_duplicates(
                 on_confirm(to_confirm, to_confirm_total, keeper["item_id"])
             group = _confirm(group, connector, catalog=catalog, source=source)
 
-        groups.append(group)
+        yield group
 
-    return sorted(groups, key=lambda g: g.reclaimable_bytes, reverse=True)
+
+def find_duplicates(
+    catalog: Catalog,
+    source: str,
+    connector: Optional[Connector] = None,
+    *,
+    confirm: bool = True,
+    min_size: int = 1,
+    on_confirm: Optional[Callable[[int, int, str], None]] = None,
+) -> list[DuplicateGroup]:
+    """Find exact-duplicate groups within one source and choose each survivor.
+
+    With `confirm=True` (the default) every group larger than the quick-hash
+    coverage window is verified by fully hashing its members, and any member whose
+    content actually differs is dropped from the group rather than archived. That
+    verification needs a live `connector`; without one, groups come back
+    unconfirmed and no action will archive them.
+
+    on_confirm(done, total, keeper_item_id), if given, fires right before each
+    group that actually needs a full-content read — not every group, since
+    anything at or under the quick-hash coverage window is confirmed for
+    free. On a library where most files exceed that window, confirmation can
+    mean thousands of full-file reads with otherwise zero progress output —
+    the same silent-but-working problem `index --debug` solved for scanning.
+
+    A thin, fully-materialized wrapper around iter_duplicates() -- for the
+    preview path (no --commit), where seeing the biggest space-savers first
+    is worth the cost of confirming the whole source before showing anything.
+    `dedup --commit` uses iter_duplicates() directly instead; see its own
+    docstring for why.
+    """
+    return sorted(
+        iter_duplicates(catalog, source, connector, confirm=confirm,
+                        min_size=min_size, on_confirm=on_confirm),
+        key=lambda g: g.reclaimable_bytes, reverse=True)
 
 
 def _confirm(group: DuplicateGroup, connector: Connector, *,

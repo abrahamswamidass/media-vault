@@ -63,3 +63,38 @@ def test_limit_only_trims_the_preview_not_the_archived_batch(tmp_path, capsys):
     with Catalog(db) as catalog:
         # All 3 groups archived despite --limit 1 — limit only affects display.
         assert catalog.count("nas", state="archived") == 3
+
+
+def test_commit_progress_survives_being_run_again_partway_through(tmp_path):
+    """The actual crash-safety property: each group's archiving commits on
+    its own (see ArchiveDuplicatesAction), and dedup streams via
+    iter_duplicates() instead of confirming the whole source before
+    archiving the first group (see its docstring) -- so a run that only
+    gets partway (simulated here with --max-groups, same as an interrupt
+    would leave things) never has to redo already-archived groups, and a
+    second run picks up exactly where the first left off instead of
+    starting over."""
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    for i in range(3):
+        _write(nas, f"g{i}_a.jpg", f"group{i}".encode() * 10000)
+        _write(nas, f"g{i}_b.jpg", f"group{i}".encode() * 10000)
+    db = str(tmp_path / "cat.sqlite")
+    args = ["dedup", "nas", "--root", str(nas), "--db", db,
+            "--max-groups", "1", "--commit", "--log-dir", str(tmp_path / "actions")]
+
+    assert main(["index", "nas", "--root", str(nas), "--db", db, "--quiet"]) == 0
+
+    assert main(args) == 0
+    with Catalog(db) as catalog:
+        assert catalog.count("nas", state="archived") == 1
+
+    # A second "interrupted-then-resumed" run picks up more, not the same one.
+    assert main(args) == 0
+    with Catalog(db) as catalog:
+        assert catalog.count("nas", state="archived") == 2
+
+    assert main(args) == 0
+    with Catalog(db) as catalog:
+        assert catalog.count("nas", state="archived") == 3
+        assert len(catalog.duplicate_groups("nas")) == 0  # nothing left to do

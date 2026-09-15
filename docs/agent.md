@@ -335,6 +335,25 @@ archive in batches instead, use `--max-groups`:
 docker exec media-vault-container python -m mediavault.cli dedup nas --max-groups 500 --commit
 ```
 
+**`--commit` archives each group as soon as it's confirmed, instead of
+confirming the whole source first.** The full-content read that confirms a
+group (anything over the 128 KB quick-hash coverage window) is real NAS I/O,
+and on a library with thousands of candidates that confirmation pass alone
+can take a long time. Without `--commit`, the preview still confirms
+everything up front so it can show the biggest space-savers first — nothing
+is at risk there, it's read-only. With `--commit`, waiting for that before
+archiving anything meant a crash partway through threw away the *entire*
+confirmation pass, no matter how close to done it was, since nothing about
+"this group is already confirmed" is saved anywhere. Now a `--commit` run
+archives (and durably commits) each group right after confirming it — an
+interrupted run genuinely picks up where it left off next time, since
+whatever already got archived drops out of consideration entirely. The
+trade-off: archiving order for `--commit` is no longer biggest-reclaimable-
+first, just whatever order the catalog happens to return groups in — `dedup`
+is already a "just do it" action once `--commit` is on, not a "decide what
+matters most" step, so that's a fine trade to make in exchange for never
+re-paying for the same confirmation work twice.
+
 **Confirmation (the full-content read step above) is silent by default on a
 large library** — the same silent-but-working problem `index --debug` solved
 for scanning. Add `--debug` to see each candidate as it's confirmed:
