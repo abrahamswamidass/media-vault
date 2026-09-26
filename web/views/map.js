@@ -224,7 +224,13 @@ function addMarkers(Lmod, clusters, layer) {
 // above it, it's the precise O(n^2) clusterByLocation(), safe because
 // "in view" at that zoom is bounded by geography, not by how much of the
 // library has loaded.
-function renderVisible(Lmod) {
+//
+// `stillLoading` (true while loadGeotaggedItems is still paging in more)
+// changes the status text's wording -- without it, "0 of 1000 in view" once
+// pagination (ordered by latitude) simply hasn't reached whatever band the
+// viewport is showing yet reads identically to "here's the real, final,
+// empty answer," and there's no way to tell which one you're looking at.
+function renderVisible(Lmod, stillLoading = false) {
   // Guards the now-multi-page load: unmount() (navigating to another tab
   // mid-load) nulls map out from under a still-in-flight loadGeotaggedItems
   // page, and its onProgress callback would otherwise call this on a dead map.
@@ -238,7 +244,11 @@ function renderVisible(Lmod) {
     : clusterByLocation(visible);
   addMarkers(Lmod, clusters, markersLayer);
   const grouped = clusters.length < visible.length ? `, ${clusters.length} location(s)` : "";
-  statusEl.textContent = `${visible.length} of ${allItems.length} geotagged photo${allItems.length === 1 ? "" : "s"} in view${grouped}. Pan or zoom to see more.`;
+  const total = stillLoading ? `${allItems.length}+` : `${allItems.length}`;
+  const tail = stillLoading
+    ? " Still loading more…"
+    : " Pan or zoom to see more.";
+  statusEl.textContent = `${visible.length} of ${total} geotagged photo${allItems.length === 1 ? "" : "s"} in view${grouped}.${tail}`;
 }
 
 export async function mount(container) {
@@ -258,13 +268,18 @@ export async function mount(container) {
       maxZoom: 19,
     }).addTo(map);
 
+    let loading = true;
     markersLayer = Lmod.layerGroup().addTo(map);
-    map.on("moveend", () => renderVisible(Lmod));
+    // Reflects `loading` at the time each moveend fires, not just at mount --
+    // a pan/zoom while pages are still arriving must still read as "still
+    // loading more", not as the final answer for whatever's in view now.
+    map.on("moveend", () => renderVisible(Lmod, loading));
 
     allItems = await loadGeotaggedItems((soFar) => {
       allItems = soFar;
-      renderVisible(Lmod);
+      renderVisible(Lmod, true);
     });
+    loading = false;
     if (!allItems.length) {
       statusEl.textContent = "No geotagged photos yet — most photos have no "
         + "GPS data, or publish hasn't run with location extraction yet.";
