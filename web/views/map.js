@@ -16,12 +16,17 @@
 // A single capped query (old approach: `limit(2000)`) truncates by whichever
 // order Firestore happens to return docs in -- once the library passed 2000
 // geotagged photos, whole locations could vanish from the map with no way to
-// reach them. Instead we page in the *entire* geotagged set once (cheap: it's
-// just lat/lng-bearing docs, and this is a single-user library) and keep it
+// reach them. Instead we page in the *entire* geotagged set once and keep it
 // in memory, then only cluster + render the slice inside the current map
 // viewport, recomputed on every pan/zoom. That's what makes pins "appear" as
-// you zoom into a place and "disappear" as you zoom back out -- the fetch is
-// no longer the bottleneck, the viewport is.
+// you zoom into a place and "disappear" as you zoom back out.
+//
+// The geotagged set itself keeps growing as `publish` works through the
+// library (~2.5K -> 11K+ within a couple weeks), so "the fetch is no longer
+// the bottleneck" doesn't hold forever -- paging in ~20+ batches of 500 is a
+// real, growing wait now, just one with no visible truncation risk. See
+// loadGeotaggedItems()'s onProgress for the fix that matters more as this
+// keeps growing: showing that wait is actually progressing, not stuck.
 import {
   collection, query, where, orderBy, startAfter, limit, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -30,8 +35,9 @@ import { loadHiddenPrefixes, isHidden } from "../hiddenFolders.js";
 import { openPhotoAt } from "../photoModal.js";
 
 const PAGE_SIZE = 500;
-// Not a normal-use ceiling -- a personal library's geotagged set is a few
-// thousand at most. Purely a safety valve against a runaway pagination loop.
+// Not a normal-use ceiling -- even an actively-growing personal library's
+// geotagged set (11K+ and counting) is well under this. Purely a safety
+// valve against a runaway pagination loop.
 const SAFETY_MAX_ITEMS = 50000;
 
 // Close enough to be "the same spot" (a room, a booth, a grave site) without
@@ -62,9 +68,22 @@ async function ensureLeaflet() {
   return L;
 }
 
-async function loadGeotaggedItems() {
-  const hiddenPrefixesPromise = loadHiddenPrefixes();
-  const docs = [];
+// onProgress(itemsSoFar), if given, fires after each page -- a growing
+// library's geotagged set has gone from ~2.5K to over 11K in a couple
+// weeks, meaning "Loading map..." with zero feedback for a real stretch
+// of many sequential page-fetches started looking indistinguishable from
+// stuck (see GitHub -- same "silent but working" problem index/dedup's
+// own --debug already solved elsewhere). Deliberately NOT used to render
+// pins incrementally: clusterByLocation() is O(n^2), and at the wide
+// world-view zoom this mounts with, nearly the whole accumulated set
+// counts as "in view" -- re-clustering a growing multi-thousand-item set
+// after every single page would scale worse than the fetch it's meant to
+// make feel faster, and could visibly freeze a phone. A cheap text update
+// carries the "is this actually doing anything" signal instead; the one
+// real (viewport-bounded) render still happens once, after everything's in.
+async function loadGeotaggedItems(onProgress) {
+  const hiddenPrefixes = await loadHiddenPrefixes();
+  const items = [];
   let cursor = null;
   for (;;) {
     const constraints = [
@@ -75,12 +94,15 @@ async function loadGeotaggedItems() {
     if (cursor) constraints.push(startAfter(cursor));
     // Sequential on purpose -- each page's cursor is the previous page's last doc.
     const snap = await getDocs(query(collection(db, "items"), ...constraints));
-    docs.push(...snap.docs);
-    if (snap.docs.length < PAGE_SIZE || docs.length >= SAFETY_MAX_ITEMS) break;
+    for (const d of snap.docs) {
+      const item = d.data();
+      if (!isHidden(item.item_id, hiddenPrefixes)) items.push(item);
+    }
+    if (onProgress) onProgress(items.length);
+    if (snap.docs.length < PAGE_SIZE || items.length >= SAFETY_MAX_ITEMS) break;
     cursor = snap.docs[snap.docs.length - 1];
   }
-  const hiddenPrefixes = await hiddenPrefixesPromise;
-  return docs.map((d) => d.data()).filter((item) => !isHidden(item.item_id, hiddenPrefixes));
+  return items;
 }
 
 // Haversine distance in meters -- real-world distance, not raw coordinate
@@ -151,9 +173,12 @@ function addMarkers(Lmod, clusters, layer) {
 }
 
 // Re-clusters and redraws markers for whatever's currently inside the map's
-// viewport. Cheap to call on every moveend -- allItems tops out in the low
-// thousands for a personal library, and this replaces markers rather than
-// the whole map, so there's no flicker.
+// viewport on every moveend -- replaces markers rather than the whole map,
+// so there's no flicker. clusterByLocation() is O(n^2) in however much of
+// allItems (11K+ and growing) falls inside the current view, so this is
+// genuinely cheap once zoomed into one area, but a wide/world-level view
+// clusters most of the library at once -- not yet a problem in practice,
+// but worth knowing if panning ever starts feeling sluggish at low zoom.
 function renderVisible(Lmod) {
   const bounds = map.getBounds();
   const visible = allItems.filter((item) => bounds.contains([item.latitude, item.longitude]));
@@ -181,7 +206,10 @@ export async function mount(container) {
       maxZoom: 19,
     }).addTo(map);
 
-    allItems = await loadGeotaggedItems();
+    allItems = await loadGeotaggedItems((soFar) => {
+      statusEl.textContent = `Loading map… ${soFar.toLocaleString()} `
+        + `geotagged photo${soFar === 1 ? "" : "s"} found so far.`;
+    });
     if (!allItems.length) {
       statusEl.textContent = "No geotagged photos yet — most photos have no "
         + "GPS data, or publish hasn't run with location extraction yet.";
