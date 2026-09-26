@@ -178,6 +178,14 @@ export function onHashChange() {
   applyPath(pathFromHash());
 }
 
+// Safety cap on how many internal reads loadPage() will chain through
+// while it's only discovering folder *names* (see below) -- generous,
+// since exhausting a whole level this way costs about one read per
+// distinct top-level entry, not one per file inside it. Guards the
+// pathological case (hundreds of loose top-level entries) rather than
+// anything a personal library's folder structure would normally hit.
+const MAX_AUTO_READS = 50;
+
 async function loadPage() {
   if (loading || exhausted) return;
   loading = true;
@@ -185,24 +193,41 @@ async function loadPage() {
   loadMoreBtn.disabled = true;
 
   const prefix = currentPrefix();
-  // A ">=" / "<" pair on the same field being ordered by (item_id) doesn't
-  // need a composite index — same range-query shape Browse's year-jump and
-  // Map's geotag filter already rely on. "" sorts after any realistic
-  // path character, so this is the standard Firestore "starts with" trick.
-  const clauses = [
-    collection(db, "items"), orderBy("item_id"),
-    where("item_id", ">=", prefix), where("item_id", "<", `${prefix}`),
-  ];
-  if (cursor !== null) {
-    clauses.push(cursorMode === "at" ? startAt(cursor) : startAfter(cursor));
-  }
-  clauses.push(limit(PAGE_SIZE));
+  // Chains multiple reads internally, but only while every doc seen so far
+  // has just been a cheap skip-past-this-subfolder jump -- discovering a
+  // folder *name* costs one read no matter how many thousands of files are
+  // inside it (see the cursor "at" jump below), which is what makes it
+  // safe to auto-continue past folder after folder instead of surfacing
+  // "Load more" once per folder. A large first-alphabetically folder used
+  // to eat the entire first page before the skip logic even got a chance
+  // to run, showing only that one folder and nothing else until clicked
+  // again. Rendering an actual FILE card is the expensive, unbounded part
+  // (a real thumbnail fetch each) -- same cost Browse's own pagination
+  // guards against -- so the very first file hit still stops here and
+  // waits for a manual "Load more", same as before.
+  let sawFile = false;
+  let reads = 0;
+  while (!exhausted && !sawFile && reads < MAX_AUTO_READS) {
+    reads += 1;
+    // A ">=" / "<" pair on the same field being ordered by (item_id) doesn't
+    // need a composite index — same range-query shape Browse's year-jump and
+    // Map's geotag filter already rely on.  sorts after any realistic
+    // path character, so this is the standard Firestore "starts with" trick.
+    const clauses = [
+      collection(db, "items"), orderBy("item_id"),
+      where("item_id", ">=", prefix), where("item_id", "<", `${prefix}`),
+    ];
+    if (cursor !== null) {
+      clauses.push(cursorMode === "at" ? startAt(cursor) : startAfter(cursor));
+    }
+    clauses.push(limit(PAGE_SIZE));
 
-  const snap = await getDocs(query(...clauses));
-  if (snap.empty) {
-    exhausted = true;
-    loadMoreBtn.hidden = true;
-  } else {
+    const snap = await getDocs(query(...clauses));
+    if (snap.empty) {
+      exhausted = true;
+      loadMoreBtn.hidden = true;
+      break;
+    }
     for (const doc of snap.docs) {
       const item = doc.data();
       const rest = item.item_id.slice(prefix.length);
@@ -211,16 +236,17 @@ async function loadPage() {
         renderFileCard(item);
         cursor = item.item_id;
         cursorMode = "after";
+        sawFile = true;
       } else {
         const name = rest.slice(0, slashAt);
         if (!folderNames.has(name)) {
           folderNames.add(name);
           renderFolderTile(name);
         }
-        // Jump past this entire subfolder's contents on the next page
+        // Jump past this entire subfolder's contents on the next read
         // instead of paging through them document-by-document -- once a
         // subfolder is known, nothing inside it can teach us about another
-        // sibling at this level. "" is the same upper-bound sentinel
+        // sibling at this level.  is the same upper-bound sentinel
         // the range query above uses, so this cursor value sorts after
         // every possible item_id under `name/`.
         cursor = `${prefix}${name}/`;
