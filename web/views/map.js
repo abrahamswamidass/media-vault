@@ -24,9 +24,16 @@
 // The geotagged set itself keeps growing as `publish` works through the
 // library (~2.5K -> 11K+ within a couple weeks), so "the fetch is no longer
 // the bottleneck" doesn't hold forever -- paging in ~20+ batches of 500 is a
-// real, growing wait now, just one with no visible truncation risk. See
-// loadGeotaggedItems()'s onProgress for the fix that matters more as this
-// keeps growing: showing that wait is actually progressing, not stuck.
+// real, growing wait now. Pins appear page by page as that wait happens
+// (see loadGeotaggedItems's onProgress) rather than only once everything's
+// in, which is what makes the wait visibly progress instead of looking
+// stuck. That's only safe because of GRID_CLUSTER_MAX_ZOOM below: the
+// initial view is a wide world view, and re-clustering a growing
+// multi-thousand-item "in view" set after every page would be a real O(n^2)
+// cost if it ran the precise clusterByLocation() -- so wide zoom uses a
+// cheap O(n) grid bucketing instead, and only switches to precise,
+// real-meters clustering once zoomed in far enough that "in view" is
+// naturally small.
 import {
   collection, query, where, orderBy, startAfter, limit, getDocs,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -68,19 +75,18 @@ async function ensureLeaflet() {
   return L;
 }
 
-// onProgress(itemsSoFar), if given, fires after each page -- a growing
+// onProgress(itemsSoFar), if given, fires after each page with the
+// growing items array itself (same reference, just longer) -- a growing
 // library's geotagged set has gone from ~2.5K to over 11K in a couple
-// weeks, meaning "Loading map..." with zero feedback for a real stretch
-// of many sequential page-fetches started looking indistinguishable from
+// weeks, meaning "Loading map..." with zero feedback for a real stretch of
+// many sequential page-fetches started looking indistinguishable from
 // stuck (see GitHub -- same "silent but working" problem index/dedup's
-// own --debug already solved elsewhere). Deliberately NOT used to render
-// pins incrementally: clusterByLocation() is O(n^2), and at the wide
-// world-view zoom this mounts with, nearly the whole accumulated set
-// counts as "in view" -- re-clustering a growing multi-thousand-item set
-// after every single page would scale worse than the fetch it's meant to
-// make feel faster, and could visibly freeze a phone. A cheap text update
-// carries the "is this actually doing anything" signal instead; the one
-// real (viewport-bounded) render still happens once, after everything's in.
+// own --debug already solved elsewhere). The caller uses this to both
+// update the status text AND render pins as they arrive -- see
+// GRID_CLUSTER_MAX_ZOOM for why that render is cheap even at 11K+ items.
+// Skipped on a page that added nothing (including the very first page of
+// a zero-geotagged library), so mount()'s "no geotagged photos yet"
+// message never gets clobbered by an empty progress render.
 async function loadGeotaggedItems(onProgress) {
   const hiddenPrefixes = await loadHiddenPrefixes();
   const items = [];
@@ -98,7 +104,7 @@ async function loadGeotaggedItems(onProgress) {
       const item = d.data();
       if (!isHidden(item.item_id, hiddenPrefixes)) items.push(item);
     }
-    if (onProgress) onProgress(items.length);
+    if (onProgress && items.length) onProgress(items);
     if (snap.docs.length < PAGE_SIZE || items.length >= SAFETY_MAX_ITEMS) break;
     cursor = snap.docs[snap.docs.length - 1];
   }
@@ -140,6 +146,45 @@ function clusterByLocation(items) {
   return clusters;
 }
 
+// Below this zoom (roughly: a wide region, a country, or the whole world),
+// swap the precise-but-O(n^2) clusterByLocation() for a cheap O(n) grid
+// bucketing (below). Two independent reasons this matters, not one: it's
+// what makes it safe to re-render on every incoming page during the
+// initial load (see mount()) now that the geotagged set runs 11K+ and
+// rising -- an O(n^2) pass that wide, that often, would visibly stall a
+// phone. And separately, at a wide zoom a real 75m cluster radius is
+// sub-pixel anyway, so a coarse grid loses nothing worth seeing. Once
+// zoomed in past this, "in view" is naturally small (geography bounds it,
+// not the total loaded count), so the precise version is cheap again.
+const GRID_CLUSTER_MAX_ZOOM = 6;
+
+// Degrees per grid cell, coarser at lower zoom -- same "good enough, not
+// geographically exact" spirit as CLUSTER_RADIUS_METERS staying a flat
+// 75m regardless of latitude.
+function gridCellSizeForZoom(zoom) {
+  if (zoom <= 2) return 10;
+  if (zoom <= 4) return 5;
+  return 2; // zoom 5-6
+}
+
+// O(n): bucket by lat/lng grid cell instead of comparing every point
+// against every other. See GRID_CLUSTER_MAX_ZOOM for why this replaces
+// clusterByLocation() at wide zoom rather than running everywhere.
+function clusterByGrid(items, zoom) {
+  const cell = gridCellSizeForZoom(zoom);
+  const buckets = new Map();
+  for (const item of items) {
+    const key = `${Math.floor(item.latitude / cell)}:${Math.floor(item.longitude / cell)}`;
+    let group = buckets.get(key);
+    if (!group) {
+      group = [];
+      buckets.set(key, group);
+    }
+    group.push(item);
+  }
+  return [...buckets.values()];
+}
+
 function centroid(group) {
   const lat = group.reduce((sum, i) => sum + i.latitude, 0) / group.length;
   const lng = group.reduce((sum, i) => sum + i.longitude, 0) / group.length;
@@ -173,17 +218,24 @@ function addMarkers(Lmod, clusters, layer) {
 }
 
 // Re-clusters and redraws markers for whatever's currently inside the map's
-// viewport on every moveend -- replaces markers rather than the whole map,
-// so there's no flicker. clusterByLocation() is O(n^2) in however much of
-// allItems (11K+ and growing) falls inside the current view, so this is
-// genuinely cheap once zoomed into one area, but a wide/world-level view
-// clusters most of the library at once -- not yet a problem in practice,
-// but worth knowing if panning ever starts feeling sluggish at low zoom.
+// viewport, on every moveend and on every incoming page during the initial
+// load -- replaces markers rather than the whole map, so there's no
+// flicker. Below GRID_CLUSTER_MAX_ZOOM this is O(n) (grid bucketing); at or
+// above it, it's the precise O(n^2) clusterByLocation(), safe because
+// "in view" at that zoom is bounded by geography, not by how much of the
+// library has loaded.
 function renderVisible(Lmod) {
+  // Guards the now-multi-page load: unmount() (navigating to another tab
+  // mid-load) nulls map out from under a still-in-flight loadGeotaggedItems
+  // page, and its onProgress callback would otherwise call this on a dead map.
+  if (!map) return;
   const bounds = map.getBounds();
+  const zoom = map.getZoom();
   const visible = allItems.filter((item) => bounds.contains([item.latitude, item.longitude]));
   markersLayer.clearLayers();
-  const clusters = clusterByLocation(visible);
+  const clusters = zoom <= GRID_CLUSTER_MAX_ZOOM
+    ? clusterByGrid(visible, zoom)
+    : clusterByLocation(visible);
   addMarkers(Lmod, clusters, markersLayer);
   const grouped = clusters.length < visible.length ? `, ${clusters.length} location(s)` : "";
   statusEl.textContent = `${visible.length} of ${allItems.length} geotagged photo${allItems.length === 1 ? "" : "s"} in view${grouped}. Pan or zoom to see more.`;
@@ -206,9 +258,12 @@ export async function mount(container) {
       maxZoom: 19,
     }).addTo(map);
 
+    markersLayer = Lmod.layerGroup().addTo(map);
+    map.on("moveend", () => renderVisible(Lmod));
+
     allItems = await loadGeotaggedItems((soFar) => {
-      statusEl.textContent = `Loading map… ${soFar.toLocaleString()} `
-        + `geotagged photo${soFar === 1 ? "" : "s"} found so far.`;
+      allItems = soFar;
+      renderVisible(Lmod);
     });
     if (!allItems.length) {
       statusEl.textContent = "No geotagged photos yet — most photos have no "
@@ -216,8 +271,6 @@ export async function mount(container) {
       return;
     }
 
-    markersLayer = Lmod.layerGroup().addTo(map);
-    map.on("moveend", () => renderVisible(Lmod));
     map.fitBounds(Lmod.latLngBounds(allItems.map((i) => [i.latitude, i.longitude])).pad(0.1));
     // fitBounds fires moveend itself once the view actually changes, but if
     // the view was already at that extent (e.g. a single point) it won't --
