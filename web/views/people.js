@@ -34,6 +34,7 @@ let statusEl = null;
 let gridEl = null;
 let people = new Map(); // personId -> { entries: [{item, bbox, score}] }
 let unsorted = []; // entries pulled out of `people` per isUnsorted() below
+let noFace = []; // items with zero detections at all -- never entered `grouped` in the first place
 
 function personLabel(personId, count) {
   return `Person ${personId} · ${count} photo${count === 1 ? "" : "s"}`;
@@ -119,6 +120,7 @@ function navigateToRoute(sub) {
 // or not-yet-loaded personId rather than erroring.
 function applyRoute(sub) {
   if (sub === "unsorted" && unsorted.length) openUnsorted();
+  else if (sub === "no-face" && noFace.length) openNoFace();
   else if (sub && people.has(sub)) openPerson(sub);
   else renderPeopleGrid();
 }
@@ -170,6 +172,28 @@ function renderUnsortedTile() {
   gridEl.appendChild(tile);
 }
 
+// Same catch-all styling as Unsorted -- this isn't a confident person
+// either, just the opposite reason: nothing was detected at all, rather
+// than a detection too thin or too unsure to trust.
+function renderNoFaceTile() {
+  const tile = document.createElement("div");
+  tile.className = "card person-card unsorted";
+  const img = document.createElement("img");
+  img.alt = "No face detected";
+  img.loading = "lazy";
+  const label = document.createElement("div");
+  label.className = "person-label";
+  label.textContent = `No face · ${noFace.length} photo${noFace.length === 1 ? "" : "s"}`;
+  tile.append(img, label);
+  tile.addEventListener("click", () => navigateToRoute("no-face"));
+
+  getDownloadURL(ref(storage, noFace[0].item.thumbnail_key))
+    .then((url) => { img.src = url; })
+    .catch((err) => { tile.classList.add("broken"); console.error("no-face", err); });
+
+  gridEl.appendChild(tile);
+}
+
 function renderPhotoCard(entry, index, personItems) {
   const card = document.createElement("div");
   card.className = "card";
@@ -194,16 +218,19 @@ function renderPeopleGrid() {
   renderBreadcrumb(null);
   gridEl.innerHTML = "";
   gridEl.className = "grid people-grid";
-  const total = people.size + (unsorted.length ? 1 : 0);
+  const total = people.size + (unsorted.length ? 1 : 0) + (noFace.length ? 1 : 0);
   statusEl.textContent = total
     ? `${people.size} ${people.size === 1 ? "person" : "people"} detected`
-      + (unsorted.length ? `, ${unsorted.length} photo(s) unsorted.` : ".")
+      + (unsorted.length ? `, ${unsorted.length} photo(s) unsorted` : "")
+      + (noFace.length ? `, ${noFace.length} with no face` : "")
+      + "."
     : "No faces detected yet — publish with FACES_LIVE=1 to find some.";
   // Most-photographed first — the people actually worth looking at tend to
   // be the ones with the most photos, not whatever order Firestore returned.
   const sorted = [...people.entries()].sort((a, b) => b[1].entries.length - a[1].entries.length);
   for (const [personId, info] of sorted) renderPersonTile(personId, info);
   if (unsorted.length) renderUnsortedTile();
+  if (noFace.length) renderNoFaceTile();
 }
 
 function openPerson(personId) {
@@ -228,6 +255,16 @@ function openUnsorted() {
   unsorted.forEach((entry, i) => renderPhotoCard(entry, i, rawItems));
 }
 
+function openNoFace() {
+  renderBreadcrumb("No face detected");
+  gridEl.innerHTML = "";
+  gridEl.className = "grid";
+  statusEl.textContent = `${noFace.length} photo${noFace.length === 1 ? "" : "s"} `
+    + "with no face detected at all (landscapes, screenshots, documents, or a face the model missed).";
+  const rawItems = noFace.map((e) => e.item);
+  noFace.forEach((entry, i) => renderPhotoCard(entry, i, rawItems));
+}
+
 async function load() {
   statusEl.textContent = "Loading…";
   try {
@@ -236,6 +273,7 @@ async function load() {
     ));
     const hiddenPrefixes = await loadHiddenPrefixes();
     const grouped = new Map();
+    const noFaceItems = [];
     for (const doc of snap.docs) {
       const item = doc.data();
       if (isHidden(item.item_id, hiddenPrefixes)) continue;
@@ -247,6 +285,16 @@ async function load() {
       const faceList = item.faces && item.faces.length
         ? item.faces
         : (item.person_ids || []).map((personId) => ({ person_id: personId, bbox: null, score: null }));
+      if (!faceList.length) {
+        // Distinct from Unsorted below: zero detections at all, not a
+        // detection too thin or too unsure to trust. Only meaningful once
+        // this item has actually been through face detection -- an item
+        // published before FACES_LIVE=1 was ever turned on looks identical
+        // to one that genuinely has no face in it, and there's no field on
+        // the item telling the two apart.
+        noFaceItems.push({ item, bbox: null, score: null });
+        continue;
+      }
       for (const face of faceList) {
         if (!grouped.has(face.person_id)) grouped.set(face.person_id, { entries: [] });
         grouped.get(face.person_id).entries.push({ item, bbox: face.bbox, score: face.score });
@@ -255,6 +303,7 @@ async function load() {
 
     people = new Map();
     unsorted = [];
+    noFace = noFaceItems;
     for (const [personId, info] of grouped) {
       if (isUnsorted(info)) unsorted.push(...info.entries);
       else people.set(personId, info);
