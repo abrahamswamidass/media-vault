@@ -170,8 +170,13 @@ class FetchFullResAction(Action):
         key = self._key
         # Already up there from an earlier look? Then this costs one HEAD and we
         # never touch the NAS. This is the idempotency guarantee for replayed intents.
+        # Reports the same outputs a fresh fetch would -- the web module's
+        # "Full res" tab resolves intent.result.outputs.key regardless of
+        # whether this run actually did the work or just confirmed it was
+        # already done, and a replay's blob is exactly as real/viewable.
         if self.blobs.exists(key):
-            raise NoOp(f"already available: {key}")
+            raise NoOp(f"already available: {key}",
+                      outputs={"key": key, "variant": self.variant, "url": self.blobs.url(key)})
 
         _, content_type = self.VARIANTS[self.variant]
         if self.variant == "preview":

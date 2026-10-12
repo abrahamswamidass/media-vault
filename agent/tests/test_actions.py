@@ -302,6 +302,11 @@ def test_replayed_fetch_is_a_noop(nas, blobs):
     assert first.status == STATUS_OK and first.committed is True
     assert second.status == STATUS_NOOP, "a replay must not re-read the NAS"
     assert second.committed is False
+    # The replay's blob is exactly as real/viewable as the first run's --
+    # a caller resolving outputs["key"] (see web/views/fullres.js) must get
+    # the same answer either way, not just on the one run that happened to
+    # do the actual work.
+    assert second.outputs["key"] == first.outputs["key"]
 
 
 def test_unknown_variant_is_refused(nas, blobs):

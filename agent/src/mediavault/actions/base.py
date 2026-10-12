@@ -66,7 +66,17 @@ class NoOp(Exception):
 
     Distinct from an error: the desired end state already holds. Idempotent
     actions raise this on the second run instead of doing the work twice.
+
+    `outputs`, if given, is reported the same as a real _execute() return
+    value (see run() below) -- for an action like FetchFullResAction, the
+    already-there blob's key is just as real and useful to a caller on a
+    replay as it was on the first run; only the "did this just do work"
+    bookkeeping differs, not the result data.
     """
+
+    def __init__(self, message: str = "", outputs: Optional[dict] = None):
+        super().__init__(message)
+        self.outputs = outputs
 
 
 # --------------------------------------------------------------------------- #
@@ -133,7 +143,7 @@ class Action(ABC):
         except NoOp as e:
             return self._result(STATUS_NOOP, committed=False,
                                 detail=str(e) or "already in the desired state",
-                                duration_ms=_elapsed_ms(started))
+                                outputs=e.outputs, duration_ms=_elapsed_ms(started))
         except Exception as e:
             return self._result(STATUS_FAILED, committed=False,
                                 detail=f"{type(e).__name__}: {e}", error=str(e),

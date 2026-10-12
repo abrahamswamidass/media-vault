@@ -54,10 +54,18 @@ function renderRow(intent) {
   info.append(name, status, when);
   row.appendChild(info);
 
-  if (intent.status === "done" && intent.result?.key) {
+  // The key lives at result.outputs.key, not result.key -- ActionResult is
+  // a dataclass with outputs as a nested field (see base.py), the same
+  // shape every other action's result already uses (ColdArchiveAction,
+  // ArchiveItemAction, ...). An intent completed before the agent's NoOp
+  // started carrying outputs on a replay (see derive.py's
+  // FetchFullResAction) can still be "done" with no key at all -- treated
+  // the same as expired below, since there's equally nothing to resolve.
+  const key = intent.result?.outputs?.key;
+  if (intent.status === "done" && key) {
     status.classList.add("amazon-status-done");
     status.textContent = "Ready";
-    getDownloadURL(ref(storage, intent.result.key))
+    getDownloadURL(ref(storage, key))
       .then((url) => {
         img.src = url;
         link.href = url;
@@ -68,6 +76,9 @@ function renderRow(intent) {
         status.classList.add("amazon-status-pending");
         status.textContent = "Expired (previews are deleted after a day)";
       });
+  } else if (intent.status === "done") {
+    status.classList.add("amazon-status-pending");
+    status.textContent = "Expired (previews are deleted after a day)";
   } else if (intent.status === "failed") {
     status.classList.add("amazon-status-failed");
     status.textContent = STATUS_LABEL.failed;
