@@ -15,6 +15,7 @@ import * as foldersView from "./views/folders.js";
 import * as peopleView from "./views/people.js";
 import * as duplicatesView from "./views/duplicates.js";
 import * as amazonView from "./views/amazon.js";
+import * as fullresView from "./views/fullres.js";
 import * as activityView from "./views/activity.js";
 
 // Plain stroked outlines (fill: none, stroke: currentColor) instead of the
@@ -28,7 +29,8 @@ const BELL_OFF_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none
 
 const VIEWS = {
   browse: browseView, map: mapView, folders: foldersView, people: peopleView,
-  duplicates: duplicatesView, amazon: amazonView, activity: activityView,
+  duplicates: duplicatesView, amazon: amazonView, fullres: fullresView,
+  activity: activityView,
 };
 const DEFAULT_VIEW = "browse";
 

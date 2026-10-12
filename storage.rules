@@ -11,7 +11,17 @@ service firebase.storage {
                   && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
       allow write: if false;
     }
-    // Everything else (previews/, any future originals mirror) stays denied
-    // by default — only thumbs/ is ever meant to be browser-readable.
+    // Same allowlist, needed for the web module's "Full res" tab to resolve
+    // a completed fetch_fullres intent's result blob (see
+    // agent/actions/derive.py's FetchFullResAction and web/views/fullres.js).
+    // Still self-cleaning: the bucket's lifecycle rule empties this prefix
+    // after a day regardless of whether anyone ever read it.
+    match /previews/{variant}/{fileName} {
+      allow read: if request.auth != null
+                  && request.auth.token.email in ["winfredbe@gmail.com", "percial@gmail.com"];
+      allow write: if false;
+    }
+    // Everything else (any future originals mirror) stays denied by default
+    // — only thumbs/ and previews/ are ever meant to be browser-readable.
   }
 }
